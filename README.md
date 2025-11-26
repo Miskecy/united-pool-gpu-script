@@ -31,6 +31,29 @@ The script is configured using the `settings.json` file.
 
 ---
 
+## Getting Your Pool Token (`user_token`)
+
+You need a pool token to authenticate your worker when requesting blocks.
+
+1. Web UI
+
+    - Open `http://localhost:3000` and click `Generate Token`.
+    - Copy the displayed token and set it in `settings.json` under `user_token`.
+
+2. API (CLI)
+    - Generate a token:
+        ```bash
+        curl -X POST http://localhost:3000/api/token/generate
+        ```
+    - You will receive a response containing your token. Set this value in `settings.json` → `user_token`.
+    - Optional: verify a block request with your token:
+        ```bash
+        curl -H "pool-token: YOUR_TOKEN" "http://localhost:3000/api/block?length=1T"
+        ```
+    - The response includes `range.start`, `range.end`, and `checkwork_addresses`.
+
+---
+
 ## Behavior
 
 ### 🔄 Work Cycle
@@ -90,6 +113,17 @@ All messages include the worker header: `👷 Worker: <worker_name>`.
 The script reloads `settings.json` before starting each new work cycle. You can edit the configuration file _while the script is running_, and the changes will automatically take effect on the next iteration.
 
 ---
+
+## Tool References
+
+-   VanitySearch (official): https://github.com/JeanLucPons/VanitySearch
+-   VanitySearch‑V2 (keyspace support): https://github.com/ilkerccom/VanitySearch-V2
+-   BitCrack (official): https://github.com/brichard19/BitCrack
+
+Notes:
+
+-   VanitySearch‑V2 supports `--keyspace` and multi‑address scanning. Use one GPU per instance; run separate instances for multi‑GPU.
+-   Adjust `vanitysearch_arguments` or `bitcrack_arguments` in `settings.json` for performance tuning.
 
 ## 💾 Files
 
