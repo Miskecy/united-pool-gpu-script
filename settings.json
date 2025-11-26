@@ -1,0 +1,21 @@
+{
+    "api_url": "http://localhost:3000/api/block",
+    "additional_addresses": ["YOUR_TARGET_ADDRESS"],
+    "user_token": "YOUR_POOL_TOKEN",
+    "worker_name": "your_worker",
+    "vanitysearch_path": "./VanitySearch",
+    "vanitysearch_arguments": "",
+    "bitcrack_path": "./cuBitCrack",
+    "bitcrack_arguments": "-t 256 -b 128 -p 64 -c",
+    "gpu_count": 1,
+    "gpu_index": 0,
+    "block_length": "1T",
+    "auto_switch": true,
+    "featured": false,
+    "scan_rewards": true,
+    "force_continue": false,
+    "oneshot": false,
+    "telegram_share": true,
+    "telegram_accesstoken": "YOUR_TELEGRAM_BOT_TOKEN",
+    "telegram_chatid": "YOUR_CHAT_ID"
+}
