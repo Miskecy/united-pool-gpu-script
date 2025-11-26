@@ -23,7 +23,7 @@ The script is configured using the `settings.json` file.
 | `bitcrack_path`                               | The file path to the `BitCrack` binary (e.g., `cuBitCrack`).                                                        | `./cuBitCrack`           |
 | `bitcrack_arguments`                          | Extra command-line arguments for `BitCrack`.                                                                        | `-t 256 -b 128 -p 64 -c` |
 | `gpu_count` / `gpu_index`                     | Total number of GPUs and the index of the GPU to be utilized.                                                       | `4` / `0`                |
-| `block_length`                                | The requested size of the work block (supports `K/M/B/T` suffixes).                                                 | `100M`                   |
+| `block_length`                                | The requested size of the work block (supports `K/M/B/T` suffixes).                                                 | `1T`                     |
 | `auto_switch`                                 | If `true`, automatically selects the best app: `BitCrack` for blocks $< 1T$ with one GPU, `VanitySearch` otherwise. | `true`                   |
 | `telegram_accesstoken`                        | The access token for your Telegram bot.                                                                             | `123456:ABC-DEF123456`   |
 | `telegram_chatid`                             | The chat ID for receiving Telegram notifications.                                                                   | `-1001234567890`         |
