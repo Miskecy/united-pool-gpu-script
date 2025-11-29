@@ -44,11 +44,14 @@ PROGRAM_BASE_COMMAND = []
 WORKER_NAME = ""
 
 ONE_SHOT = False
+POST_BLOCK_DELAY_SECONDS = 10
+POST_BLOCK_DELAY_ENABLED = True
 
 def _apply_settings(s):
     global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_URL, POOL_TOKEN, ADDITIONAL_ADDRESSES, BLOCK_LENGTH
     global APP_PATH, APP_ARGS, GPU_INDEX, PROGRAM_BASE_COMMAND, WORKER_NAME, ONE_SHOT
     global BITCRACK_PATH, BITCRACK_ARGS, AUTO_SWITCH, GPU_COUNT
+    global POST_BLOCK_DELAY_SECONDS, POST_BLOCK_DELAY_ENABLED
     TELEGRAM_BOT_TOKEN = s.get("telegram_accesstoken", "")
     TELEGRAM_CHAT_ID = str(s.get("telegram_chatid", ""))
     API_URL = s.get("api_url", "")
@@ -81,6 +84,24 @@ def _apply_settings(s):
     ]
     if isinstance(APP_ARGS, str) and APP_ARGS.strip():
         PROGRAM_BASE_COMMAND += shlex.split(APP_ARGS)
+    try:
+        POST_BLOCK_DELAY_ENABLED = bool(s.get("post_block_delay_enabled", True))
+    except Exception:
+        POST_BLOCK_DELAY_ENABLED = True
+    if POST_BLOCK_DELAY_ENABLED:
+        delay_min = s.get("post_block_delay_minutes")
+        try:
+            if delay_min is not None:
+                dm = float(delay_min)
+                if dm < 0:
+                    dm = 0
+                POST_BLOCK_DELAY_SECONDS = int(dm * 60)
+            else:
+                POST_BLOCK_DELAY_SECONDS = 10
+        except Exception:
+            POST_BLOCK_DELAY_SECONDS = 10
+    else:
+        POST_BLOCK_DELAY_SECONDS = 0
 
 def refresh_settings():
     s = _load_settings()
@@ -96,6 +117,7 @@ previous_keyspace = None
 PENDING_KEYS_FILE = "pending_keys.json"
 LAST_POST_ATTEMPT = 0
 ALL_BLOCKS_SOLVED = False
+PROCESSED_ONE_BLOCK = False
 
 def _load_pending_keys():
     global PENDING_KEYS
@@ -136,9 +158,9 @@ def _scheduled_pending_post_retry():
         LAST_POST_ATTEMPT = now
         ok = _retry_pending_keys_now()
         if ok:
-            logger("Success", "Envio pendente realizado com sucesso.")
+            logger("Success", "Pending keys posted successfully.")
         else:
-            logger("Warning", "API indisponível. Manteremos as chaves e tentaremos novamente em 30s.")
+            logger("Warning", "API unavailable. Keeping keys and retrying in 30s.")
 
 def flush_pending_keys_blocking():
     global PENDING_KEYS
@@ -449,7 +471,7 @@ def run_external_program(start_hex, end_hex):
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
 
     try:
-        # Usamos Popen para rodar o processo e acessar seus streams de I/O em tempo real
+        # Use Popen to run the process and access real-time I/O streams
         with subprocess.Popen(
             command, 
             stdout=subprocess.PIPE, 
@@ -458,9 +480,9 @@ def run_external_program(start_hex, end_hex):
             bufsize=1 
         ) as process:
             
-            # Lê e exibe a saída do subprocesso linha por linha
+            # Read and display subprocess output line by line
             for line in process.stdout:
-                # Feedback em tempo real
+                # Real-time feedback
                 print(f"{Fore.CYAN}  > {line.strip()}{Style.RESET_ALL}", flush=True)
 
             # Espera o processo terminar e verifica o código de retorno
@@ -526,7 +548,7 @@ def process_out_file():
                             keys_to_post.append(raw)
 
     except Exception as e:
-        logger("Error", f"Erro ao processar o arquivo '{OUT_FILE}': {e}")
+        logger("Error", f"Error processing file '{OUT_FILE}': {e}")
         return False
 
     # 1. Check and Save Additional Address hit (and Notify)
@@ -558,7 +580,7 @@ def process_out_file():
         logger("Info", f"Accumulated {len(PENDING_KEYS)} keys for posting.")
         _save_pending_keys()
 
-    # 3. Limpar out.txt para o próximo ciclo
+    # 3. Clear out.txt for the next cycle
     try:
         with open(OUT_FILE, "w"):
             pass
@@ -566,10 +588,10 @@ def process_out_file():
     except Exception as e:
         logger("Error", f"Failed to clear file '{OUT_FILE}': {e}")
 
-    return False # Indica que a chave adicional NÃO foi encontrada
+    return False # Indicates the additional address key was NOT found
 
 # ==============================================================================================
-#                                    LOOP PRINCIPAL
+#                                    MAIN LOOP
 # ==============================================================================================
 
 if __name__ == "__main__":
@@ -579,15 +601,16 @@ if __name__ == "__main__":
     while True:
         refresh_settings()
         flush_pending_keys_blocking()
-        # 1. Fetch de dados do bloco
+        if ONE_SHOT and PROCESSED_ONE_BLOCK:
+            logger("Info", "One-shot mode enabled. Exiting after first block.")
+            break
+        # 1. Fetch block data
         block_data = fetch_block_data()
         
         if ALL_BLOCKS_SOLVED:
             break
         if not block_data:
             logger("Error", "Could not fetch block data. Retrying in 30 seconds.")
-            if ONE_SHOT:
-                break
             time.sleep(30)
             continue
 
@@ -595,23 +618,19 @@ if __name__ == "__main__":
         range_data = block_data.get("range", {})
         start_hex = range_data.get("start", "").replace("0x", "")
         end_hex = range_data.get("end", "").replace("0x", "")
-        current_keyspace = f"{start_hex}:{end_hex}" # (NOVO)
+        current_keyspace = f"{start_hex}:{end_hex}" # (NEW)
 
         if not addresses:
             logger("Warning", "No addresses found in block. Retrying in 30 seconds.")
-            if ONE_SHOT:
-                break
             time.sleep(30)
             continue
 
         if not (start_hex and end_hex):
             logger("Error", "Key range (start/end) missing. Retrying in 30 seconds.")
-            if ONE_SHOT:
-                break
             time.sleep(30)
             continue
         
-        # 2. NOVO: Lógica de Notificação de Novo Bloco
+        # 2. New: New block notification logic
         if current_keyspace != previous_keyspace:
             previous_keyspace = current_keyspace
             
@@ -624,22 +643,24 @@ if __name__ == "__main__":
             send_telegram_notification(new_block_message)
             logger("Info", f"New block notification sent: {current_keyspace}")
 
-        # 3. Salvar endereços em in.txt
+        # 3. Save addresses to in.txt
         save_addresses_to_in_file(addresses, ADDITIONAL_ADDRESSES)
         
-        # 4. Executar o programa externo (sem divisão de partes)
+        # 4. Run external program (no chunking)
         run_external_program(start_hex, end_hex)
 
-        # 5. Processar o arquivo de saída (out.txt)
+        # 5. Process output file (out.txt)
         solution_found = process_out_file()
 
-        # 6. Lógica de parada
+        PROCESSED_ONE_BLOCK = True
+        # 6. Stop logic
         if solution_found:
             logger("Success", "ADDITIONAL ADDRESS KEY FOUND. Exiting script.")
             break
 
         flush_pending_keys_blocking()
-        logger("Info", "No critical solution this round. Waiting 10 seconds for next fetch.")
         if ONE_SHOT:
+            logger("Info", "One-shot mode enabled. Exiting after first block.")
             break
-        time.sleep(10)
+        logger("Info", f"No critical solution this round. Waiting {POST_BLOCK_DELAY_SECONDS} seconds for next fetch.")
+        time.sleep(POST_BLOCK_DELAY_SECONDS)
