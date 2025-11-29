@@ -28,6 +28,8 @@ The script is configured using the `settings.json` file.
 | `telegram_accesstoken`                        | The access token for your Telegram bot.                                                                             | `123456:ABC-DEF123456`   |
 | `telegram_chatid`                             | The chat ID for receiving Telegram notifications.                                                                   | `-1001234567890`         |
 | `oneshot`                                     | If `true`, the script performs one single cycle and then exits.                                                     | `false`                  |
+| `post_block_delay_enabled`                    | Enable/disable delay between blocks. If `false`, no wait between blocks.                                            | `true`                   |
+| `post_block_delay_minutes`                    | Delay between finishing a block and fetching the next, in minutes (used only if enabled). Default: `10s`.           | `1.5`                    |
 
 ---
 
@@ -70,7 +72,7 @@ You need a pool token to authenticate your worker when requesting blocks.
 
 ### 🚀 One-Shot Mode (`oneshot: true`)
 
-The script executes a single, complete cycle (fetch, crack, process) and then terminates, regardless of success or failure.
+The script retries until it successfully fetches one block, then runs a single complete cycle (fetch, crack, process) and terminates.
 
 ### 🔁 Loop Mode (Default)
 
