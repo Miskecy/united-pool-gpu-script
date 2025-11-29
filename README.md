@@ -1,4 +1,4 @@
-# Unitead GPU Script
+# United Puzzle Pool GPU Script
 
 ## Overview
 
