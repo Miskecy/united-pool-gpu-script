@@ -47,6 +47,9 @@ ONE_SHOT = False
 POST_BLOCK_DELAY_SECONDS = 10
 POST_BLOCK_DELAY_ENABLED = True
 
+TELEGRAM_STATE_FILE = "telegram_state.json"
+STATUS_MESSAGE_ID = None
+
 def _apply_settings(s):
     global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_URL, POOL_TOKEN, ADDITIONAL_ADDRESSES, BLOCK_LENGTH
     global APP_PATH, APP_ARGS, GPU_INDEX, PROGRAM_BASE_COMMAND, WORKER_NAME, ONE_SHOT
@@ -118,6 +121,20 @@ PENDING_KEYS_FILE = "pending_keys.json"
 LAST_POST_ATTEMPT = 0
 ALL_BLOCKS_SOLVED = False
 PROCESSED_ONE_BLOCK = False
+
+STATUS = {
+    "worker": "",
+    "gpu": "",
+    "range": "",
+    "addresses": 0,
+    "pending_keys": 0,
+    "last_batch": "-",
+    "last_error": "-",
+    "keyfound": "-",
+    "all_blocks_solved": False,
+    "next_fetch_in": 0,
+    "updated_at": "",
+}
 
 def _load_pending_keys():
     global PENDING_KEYS
@@ -216,31 +233,180 @@ def logger(level, message):
 
 # ----------------------------------------------------------------------------------------------
 
-def send_telegram_notification(message):
-    """
-    Send a notification message to Telegram.
-    """
+def _load_telegram_state():
+    try:
+        if os.path.exists(TELEGRAM_STATE_FILE):
+            with open(TELEGRAM_STATE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+    except Exception:
+        pass
+    return {}
+
+def _save_telegram_state(state):
+    try:
+        with open(TELEGRAM_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+def _status_key():
+    return f"{str(TELEGRAM_CHAT_ID)}::{WORKER_NAME or 'default'}"
+
+def _ensure_status_message(initial_text):
+    global STATUS_MESSAGE_ID
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return None
+    if STATUS_MESSAGE_ID is None:
+        st = _load_telegram_state()
+        key = _status_key()
+        mid = st.get(key)
+        if isinstance(mid, int):
+            STATUS_MESSAGE_ID = mid
+        else:
+            telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": str(TELEGRAM_CHAT_ID),
+                "text": initial_text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+            try:
+                r = requests.post(telegram_url, data=payload, timeout=10)
+                if r.status_code == 200:
+                    js = {}
+                    try:
+                        js = r.json() or {}
+                    except Exception:
+                        js = {}
+                    msg = js.get("result") or {}
+                    STATUS_MESSAGE_ID = int(msg.get("message_id")) if msg.get("message_id") is not None else None
+                    if STATUS_MESSAGE_ID is not None:
+                        st[key] = STATUS_MESSAGE_ID
+                        _save_telegram_state(st)
+                else:
+                    snip = ""
+                    try:
+                        snip = (r.text or "")[:200].replace("\n", " ")
+                    except Exception:
+                        pass
+                    logger("Error", f"Error creating Telegram status message: {r.status_code} {snip}")
+                    try:
+                        plain = re.sub(r"<[^>]+>", "", initial_text)
+                        r2 = requests.post(telegram_url, data={
+                            "chat_id": str(TELEGRAM_CHAT_ID),
+                            "text": plain,
+                            "disable_web_page_preview": True,
+                        }, timeout=10)
+                        if r2.status_code == 200:
+                            js2 = {}
+                            try:
+                                js2 = r2.json() or {}
+                            except Exception:
+                                js2 = {}
+                            msg2 = js2.get("result") or {}
+                            STATUS_MESSAGE_ID = int(msg2.get("message_id")) if msg2.get("message_id") is not None else None
+                            if STATUS_MESSAGE_ID is not None:
+                                st[key] = STATUS_MESSAGE_ID
+                                _save_telegram_state(st)
+                    except Exception:
+                        pass
+            except requests.RequestException:
+                logger("Error", "Request error while creating Telegram status message.")
+    return STATUS_MESSAGE_ID
+
+def edit_telegram_status(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger("Warning", "Telegram settings missing. Notification not sent.")
         return
-
-    telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     if WORKER_NAME:
-        message = f"👷 Worker: `{WORKER_NAME}`\n\n{message}"
+        w = _escape_html(WORKER_NAME)
+        message = f"👷 <b>Worker</b>: <code>{w}</code>\n\n{message}"
+    mid = _ensure_status_message(message)
+    if not mid:
+        return
+    edit_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
     payload = {
-        "chat_id": str(TELEGRAM_CHAT_ID), 
+        "chat_id": str(TELEGRAM_CHAT_ID),
+        "message_id": mid,
         "text": message,
-        "parse_mode": "Markdown"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
     }
-
     try:
-        response = requests.post(telegram_url, data=payload, timeout=10)
-        if response.status_code == 200:
-            logger("Success", "Telegram notification sent!")
+        r = requests.post(edit_url, data=payload, timeout=10)
+        if r.status_code == 200:
+            logger("Success", "Telegram status updated")
         else:
-            logger("Error", f"Error sending Telegram: Status {response.status_code}. Response: {response.text}")
+            st = _load_telegram_state()
+            key = _status_key()
+            st.pop(key, None)
+            _save_telegram_state(st)
+            STATUS_MESSAGE_ID = None
+            _ensure_status_message(message)
+            snippet = ""
+            try:
+                snippet = (r.text or "")[:120].replace("\n", " ")
+            except Exception:
+                pass
+            logger("Warning", f"Edit failed ({r.status_code}). Recreated status message. {snippet}")
     except requests.RequestException:
-        logger("Error", "Request error while trying to send Telegram notification.")
+        logger("Error", "Request error while editing Telegram message.")
+
+def send_telegram_notification(message):
+    edit_telegram_status(message)
+
+def _escape_html(s):
+    try:
+        t = "" if s is None else str(s)
+        return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    except Exception:
+        return ""
+
+def _format_status_html():
+    gpu = _escape_html(STATUS.get("gpu", ""))
+    rng = _escape_html(STATUS.get("range", ""))
+    addrs = STATUS.get("addresses", 0)
+    pending = STATUS.get("pending_keys", 0)
+    last_batch = _escape_html(STATUS.get("last_batch", "-"))
+    last_error = _escape_html(STATUS.get("last_error", "-"))
+    keyfound = _escape_html(STATUS.get("keyfound", "-"))
+    next_in = STATUS.get("next_fetch_in", 0)
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    lines = [
+        "📊 <b>Status</b>",
+        f"⚙️ <b>GPU</b>: <code>{gpu}</code>",
+        f"🧭 <b>Range</b>: <code>{rng}</code>",
+        f"📫 <b>Addresses</b>: <code>{addrs}</code>",
+        f"📦 <b>Pending Keys</b>: <code>{pending}</code>",
+        f"📤 <b>Last Batch</b>: <code>{last_batch}</code>",
+        f"❗ <b>Last Error</b>: <i>{last_error}</i>",
+        f"🔑 <b>Keyfound</b>: <code>{keyfound}</code>",
+        f"⏱️ <b>Next Fetch</b>: <code>{next_in}s</code>",
+        f"🕒 <i>Updated {ts}</i>",
+    ]
+    if STATUS.get("all_blocks_solved", False):
+        lines.append("🏁 <b>All blocks solved</b> ✅")
+    return "\n".join(lines)
+
+def update_status(fields=None):
+    if fields:
+        for k, v in fields.items():
+            STATUS[k] = v
+    if not STATUS.get("gpu"):
+        STATUS["gpu"] = str(GPU_INDEX)
+    STATUS["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    edit_telegram_status(_format_status_html())
+
+def update_status_rl(fields, category, min_interval):
+    now = time.time()
+    last = LAST_TELEGRAM_TS.get(category, 0)
+    if now - last < min_interval:
+        return
+    LAST_TELEGRAM_TS[category] = now
+    update_status(fields)
 
 # ----------------------------------------------------------------------------------------------
 
@@ -276,34 +442,24 @@ def fetch_block_data():
             if msg.lower() == "all blocks are solved":
                 global ALL_BLOCKS_SOLVED
                 ALL_BLOCKS_SOLVED = True
-                send_telegram_notification("🏁 **ALL BLOCKS ARE SOLVED**\n\nShutting down worker.")
+                update_status({"all_blocks_solved": True, "next_fetch_in": 0})
                 logger("Success", "All blocks solved. Shutting down.")
                 return None
             error_message = (
-                f"⚠️ **NO RANGE AVAILABLE**\n\n"
-                f"Status: `409`\n"
-                f"Detail: `{msg or 'No available random range'}`"
+                f"No range available: `{msg or 'No available random range'}`"
             )
-            send_telegram_notification_rl(error_message, "no_range", 300)
+            update_status_rl({"last_error": error_message}, "no_range", 300)
             logger("Error", f"Error fetching block: 409 - {response.text}")
             return None
         else:
-            error_message = (
-                f"🚨 **ALERT: API DOWN OR ERROR!**\n\n"
-                f"Failed to fetch work block.\n"
-                f"Status: `{response.status_code}`. Response: {response.text[:100]}..."
-            )
-            send_telegram_notification_rl(error_message, "api_fetch_error", 300)
+            error_message = f"API error `{response.status_code}`"
+            update_status_rl({"last_error": error_message}, "api_fetch_error", 300)
             logger("Error", f"Error fetching block: {response.status_code} - {response.text}")
             return None
             
     except requests.RequestException as e:
-        error_message = (
-            f"🚨 **ALERT: API CONNECTION ERROR!**\n\n"
-            f"The script could not connect to the API.\n"
-            f"Error Detail: `{type(e).__name__}` - {e}"
-        )
-        send_telegram_notification_rl(error_message, "api_fetch_error", 300)
+        error_message = f"API connection error `{type(e).__name__}`"
+        update_status_rl({"last_error": error_message}, "api_fetch_error", 300)
         logger("Error", f"Request error {type(e).__name__}: {e}")
         return None
 
@@ -326,12 +482,7 @@ def post_private_keys(private_keys):
         response = requests.post(API_URL+"/submit", headers=headers, json=data, timeout=10)
         if response.status_code == 200:
             logger("Success", "Private keys posted successfully.")
-            success_message = (
-                f"✅ **BATCH SENT**\n\n"
-                f"Keys: `{len(private_keys)}`\n"
-                f"Status: ✅ API OK"
-            )
-            send_telegram_notification(success_message)
+            update_status({"last_batch": f"Sent {len(private_keys)} keys"})
             return True
         else:
             snippet = ""
@@ -342,21 +493,11 @@ def post_private_keys(private_keys):
             logger("Error", f"Failed to send batch: Status {response.status_code}. Retrying in 30s.")
             if snippet:
                 logger("Info", f"Detail: {snippet}...")
-            error_message = (
-                f"⚠️ **FAILED TO SEND BATCH**\n\n"
-                f"Status: `{response.status_code}`\n"
-                f"Will retry in `30s`. Data remains saved."
-            )
-            send_telegram_notification_rl(error_message, "post_error", 300)
+            update_status_rl({"last_batch": f"Failed status {response.status_code}"}, "post_error", 300)
             return False
     except requests.RequestException as e:
         logger("Error", f"Connection error while sending batch: {type(e).__name__}. Retrying in 30s.")
-        error_message = (
-            f"🌐 **CONNECTION ERROR ON SEND**\n\n"
-            f"Detail: `{type(e).__name__}` - {e}\n"
-            f"Will retry in `30s`. Data remains saved."
-        )
-        send_telegram_notification_rl(error_message, "post_network_error", 300)
+        update_status_rl({"last_batch": f"Connection error {type(e).__name__}"}, "post_network_error", 300)
         return False
 
 # ==============================================================================================
@@ -565,20 +706,14 @@ def process_out_file():
         if keys_to_post:
             PENDING_KEYS.extend(keys_to_post)
             _save_pending_keys()
-        addrs_list = "\n".join([f"`{addr}`" for (addr, _) in found_pairs])
-        message = (
-            f"🔑 **PRIVATE KEY FOUND**\n\n"
-            f"Additional addresses:\n{addrs_list}\n\n"
-            f"Regular keys accumulated: `{len(keys_to_post)}`\n"
-            f"File: `{KEYFOUND_FILE}`"
-        )
-        send_telegram_notification(message)
+        update_status({"keyfound": f"{len(found_pairs)} saved to {KEYFOUND_FILE}", "pending_keys": len(PENDING_KEYS)})
         return True
     
     if keys_to_post:
         PENDING_KEYS.extend(keys_to_post)
         logger("Info", f"Accumulated {len(PENDING_KEYS)} keys for posting.")
         _save_pending_keys()
+        update_status({"pending_keys": len(PENDING_KEYS)})
 
     # 3. Clear out.txt for the next cycle
     try:
@@ -633,14 +768,7 @@ if __name__ == "__main__":
         # 2. New: New block notification logic
         if current_keyspace != previous_keyspace:
             previous_keyspace = current_keyspace
-            
-            new_block_message = (
-                f"⛏️ **NEW BLOCK**\n\n"
-                f"Range: `{current_keyspace}`\n"
-                f"Addresses: `{len(addresses)}`\n"
-                f"GPU: `{GPU_INDEX}`"
-            )
-            send_telegram_notification(new_block_message)
+            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": GPU_INDEX})
             logger("Info", f"New block notification sent: {current_keyspace}")
 
         # 3. Save addresses to in.txt
@@ -662,5 +790,6 @@ if __name__ == "__main__":
         if ONE_SHOT:
             logger("Info", "One-shot mode enabled. Exiting after first block.")
             break
+        update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": POST_BLOCK_DELAY_SECONDS})
         logger("Info", f"No critical solution this round. Waiting {POST_BLOCK_DELAY_SECONDS} seconds for next fetch.")
         time.sleep(POST_BLOCK_DELAY_SECONDS)
