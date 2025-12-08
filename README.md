@@ -176,3 +176,4 @@ Notes:
 -   `KEYFOUND.txt`: Stores `addr:priv` pairs when an `additional_address` key is successfully found.
 -   `pending_keys.json`: Queue of private keys awaiting batch submission to the API. Flushed in dynamic batches (10–30), with range‑safe filler keys automatically added when the queue is short; cleared after **3 failed retries** on API "incompatible privatekeys" responses.
 -   `telegram_state.json`: Persists the Telegram `message_id` per worker to enable single-message editing across restarts.
+    -   `bash safety_monitor.sh -g all`
