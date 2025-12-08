@@ -98,6 +98,10 @@ The script maintains a single Telegram message and continuously edits it for cle
 
 -   `👷 Worker: <code>worker_name</code>`
 -   `📊 Status` with the following lines:
+    -   `🧩 Session: <code>session_id</code>`
+    -   `⏳ Active: <code>duration</code>`
+    -   `✅ Blocks: <code>count</code>`
+    -   `🔁 Consecutive: <code>count</code>`
     -   `⚙️ GPU: <code>gpu_index</code>`
     -   `🧭 Range: <code>start:end</code>`
     -   `📫 Addresses: <code>count</code>`
@@ -108,6 +112,27 @@ The script maintains a single Telegram message and continuously edits it for cle
     -   `⏱️ Next Fetch: <code>Xs</code>`
     -   `🕒 Updated timestamp`
     -   `🏁 All blocks solved ✅` when applicable
+
+### Example
+
+```
+👷 Worker: projetinho
+
+📊 Status
+🧩 Session: 3f7f7e12
+⏳ Active: 50 mins
+✅ Blocks: 1
+🔁 Consecutive: 1
+⚙️ GPU: 0
+🧭 Range: 75760acbd8897d9fe9:75760ace93076ccfe9
+📫 Addresses: 10
+📦 Pending Keys: 0
+📤 Last Batch: Sent 10 keys
+❗ Last Error: -
+🔑 Keyfound: -
+⏱️ Next Fetch: 0s
+🕒 Updated 2025-12-08 12:20:44
+```
 
 ### Notes
 
