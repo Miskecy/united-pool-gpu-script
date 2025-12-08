@@ -13,6 +13,8 @@ from colorama import Fore, Style, init
 import json
 import shlex
 import re
+import uuid
+import hashlib
 
 def _load_settings():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +51,7 @@ POST_BLOCK_DELAY_ENABLED = True
 
 TELEGRAM_STATE_FILE = "telegram_state.json"
 STATUS_MESSAGE_ID = None
+LAST_MESSAGE_HASH = None
 
 def _apply_settings(s):
     global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_URL, POOL_TOKEN, ADDITIONAL_ADDRESSES, BLOCK_LENGTH
@@ -318,6 +321,11 @@ def _ensure_status_message(initial_text):
                     STATUS_MESSAGE_ID = int(msg.get("message_id")) if msg.get("message_id") is not None else None
                     if STATUS_MESSAGE_ID is not None:
                         st[key] = STATUS_MESSAGE_ID
+                        try:
+                            h = hashlib.sha256((initial_text or "").encode("utf-8")).hexdigest()
+                            st[f"{key}::last_hash"] = h
+                        except Exception:
+                            pass
                         _save_telegram_state(st)
                 else:
                     snip = ""
@@ -343,6 +351,11 @@ def _ensure_status_message(initial_text):
                             STATUS_MESSAGE_ID = int(msg2.get("message_id")) if msg2.get("message_id") is not None else None
                             if STATUS_MESSAGE_ID is not None:
                                 st[key] = STATUS_MESSAGE_ID
+                                try:
+                                    h2 = hashlib.sha256((plain or "").encode("utf-8")).hexdigest()
+                                    st[f"{key}::last_hash"] = h2
+                                except Exception:
+                                    pass
                                 _save_telegram_state(st)
                     except Exception:
                         pass
@@ -360,6 +373,16 @@ def edit_telegram_status(message):
     mid = _ensure_status_message(message)
     if not mid:
         return
+    try:
+        key = _status_key()
+        st = _load_telegram_state()
+        new_hash = hashlib.sha256((message or "").encode("utf-8")).hexdigest()
+        last_hash = st.get(f"{key}::last_hash")
+        if last_hash == new_hash:
+            logger("Info", "Telegram status unchanged; skipped edit")
+            return
+    except Exception:
+        pass
     edit_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
     payload = {
         "chat_id": str(TELEGRAM_CHAT_ID),
@@ -371,20 +394,39 @@ def edit_telegram_status(message):
     try:
         r = requests.post(edit_url, data=payload, timeout=10)
         if r.status_code == 200:
-            logger("Success", "Telegram status updated")
-        else:
-            st = _load_telegram_state()
-            key = _status_key()
-            st.pop(key, None)
-            _save_telegram_state(st)
-            STATUS_MESSAGE_ID = None
-            _ensure_status_message(message)
-            snippet = ""
             try:
-                snippet = (r.text or "")[:120].replace("\n", " ")
+                st[f"{key}::last_hash"] = new_hash
+                _save_telegram_state(st)
             except Exception:
                 pass
-            logger("Warning", f"Edit failed ({r.status_code}). Recreated status message. {snippet}")
+            logger("Success", "Telegram status updated")
+        else:
+            desc = ""
+            try:
+                js = r.json() or {}
+                desc = str(js.get("description", ""))
+            except Exception:
+                desc = ""
+            if "message is not modified" in desc.lower():
+                try:
+                    st[f"{key}::last_hash"] = new_hash
+                    _save_telegram_state(st)
+                except Exception:
+                    pass
+                logger("Info", "Telegram edit skipped: message not modified")
+            else:
+                st = _load_telegram_state()
+                key = _status_key()
+                st.pop(key, None)
+                _save_telegram_state(st)
+                STATUS_MESSAGE_ID = None
+                _ensure_status_message(message)
+                snippet = ""
+                try:
+                    snippet = (r.text or "")[:120].replace("\n", " ")
+                except Exception:
+                    pass
+                logger("Warning", f"Edit failed ({r.status_code}). Recreated status message. {snippet}")
     except requests.RequestException:
         logger("Error", "Request error while editing Telegram message.")
 
@@ -399,6 +441,13 @@ def _escape_html(s):
         return ""
 
 def _format_status_html():
+    sid = _escape_html(STATUS.get("session_id", ""))
+    started = STATUS.get("session_started_ts", 0)
+    now_ts = time.time()
+    dur = int(max(0, now_ts - (started or 0)))
+    active = _escape_html(_format_duration(dur))
+    blocks = STATUS.get("session_blocks", 0)
+    consec = STATUS.get("session_consecutive", 0)
     gpu = _escape_html(STATUS.get("gpu", ""))
     rng = _escape_html(STATUS.get("range", ""))
     addrs = STATUS.get("addresses", 0)
@@ -411,6 +460,10 @@ def _format_status_html():
 
     lines = [
         "📊 <b>Status</b>",
+        f"🧩 <b>Session</b>: <code>{sid}</code>",
+        f"⏳ <b>Active</b>: <code>{active}</code>",
+        f"✅ <b>Blocks</b>: <code>{blocks}</code>",
+        f"🔁 <b>Consecutive</b>: <code>{consec}</code>",
         f"⚙️ <b>GPU</b>: <code>{gpu}</code>",
         f"🧭 <b>Range</b>: <code>{rng}</code>",
         f"📫 <b>Addresses</b>: <code>{addrs}</code>",
@@ -424,6 +477,29 @@ def _format_status_html():
     if STATUS.get("all_blocks_solved", False):
         lines.append("🏁 <b>All blocks solved</b> ✅")
     return "\n".join(lines)
+
+def _format_duration(seconds):
+    s = int(max(0, seconds or 0))
+    w = s // 604800
+    s %= 604800
+    d = s // 86400
+    s %= 86400
+    h = s // 3600
+    s %= 3600
+    m = s // 60
+    s %= 60
+    parts = []
+    if w:
+        parts.append(f"{w} week" + ("s" if w != 1 else ""))
+    if d:
+        parts.append(f"{d} day" + ("s" if d != 1 else ""))
+    if h:
+        parts.append(f"{h} hour" + ("s" if h != 1 else ""))
+    if m:
+        parts.append(f"{m} min" + ("s" if m != 1 else ""))
+    if not parts:
+        parts.append(f"{s} sec" + ("s" if s != 1 else ""))
+    return " ".join(parts)
 
 def update_status(fields=None):
     if fields:
@@ -797,6 +873,10 @@ if __name__ == "__main__":
     clean_io_files()
     refresh_settings()
     _load_pending_keys()
+    STATUS["session_id"] = uuid.uuid4().hex[:8]
+    STATUS["session_started_ts"] = time.time()
+    STATUS["session_blocks"] = 0
+    STATUS["session_consecutive"] = 0
     while True:
         refresh_settings()
         flush_pending_keys_blocking()
@@ -847,10 +927,16 @@ if __name__ == "__main__":
         save_addresses_to_in_file(addresses, ADDITIONAL_ADDRESSES)
         
         # 4. Run external program (no chunking)
-        run_external_program(start_hex, end_hex)
+        ran_ok = run_external_program(start_hex, end_hex)
 
         # 5. Process output file (out.txt)
         solution_found = process_out_file()
+
+        if ran_ok:
+            STATUS["session_blocks"] = int(STATUS.get("session_blocks", 0)) + 1
+            STATUS["session_consecutive"] = int(STATUS.get("session_consecutive", 0)) + 1
+        else:
+            STATUS["session_consecutive"] = 0
 
         PROCESSED_ONE_BLOCK = True
         # 6. Stop logic
