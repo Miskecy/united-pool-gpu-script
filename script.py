@@ -117,6 +117,9 @@ init(autoreset=True)
 
 PENDING_KEYS = []
 previous_keyspace = None
+CURRENT_ADDR_COUNT = 10
+CURRENT_RANGE_START = None
+CURRENT_RANGE_END = None
 PENDING_KEYS_FILE = "pending_keys.json"
 LAST_POST_ATTEMPT = 0
 ALL_BLOCKS_SOLVED = False
@@ -157,21 +160,32 @@ def _save_pending_keys():
 def _retry_pending_keys_now():
     global PENDING_KEYS
     posted = False
-    while len(PENDING_KEYS) >= 10:
-        batch = PENDING_KEYS[:10]
+    required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
+    while len(PENDING_KEYS) >= required:
+        batch = PENDING_KEYS[:required]
         if post_private_keys(batch):
-            PENDING_KEYS = PENDING_KEYS[10:]
+            PENDING_KEYS = PENDING_KEYS[required:]
             posted = True
             _save_pending_keys()
         else:
             _save_pending_keys()
             break
+    # If we have some keys but fewer than required, try filling with randoms in current range
+    if not posted and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
+        fillers = _generate_filler_keys(required - len(PENDING_KEYS), CURRENT_RANGE_START, CURRENT_RANGE_END, exclude=PENDING_KEYS)
+        batch = PENDING_KEYS + fillers
+        if len(batch) == required:
+            if post_private_keys(batch):
+                PENDING_KEYS = []
+                posted = True
+                _save_pending_keys()
     return posted
 
 def _scheduled_pending_post_retry():
     global LAST_POST_ATTEMPT
     now = time.time()
-    if now - LAST_POST_ATTEMPT >= 30 and len(PENDING_KEYS) >= 10:
+    required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
+    if now - LAST_POST_ATTEMPT >= 30 and len(PENDING_KEYS) >= required:
         LAST_POST_ATTEMPT = now
         ok = _retry_pending_keys_now()
         if ok:
@@ -182,15 +196,27 @@ def _scheduled_pending_post_retry():
 def flush_pending_keys_blocking():
     global PENDING_KEYS
     posted = False
-    while len(PENDING_KEYS) >= 10:
-        batch = PENDING_KEYS[:10]
+    required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
+    while len(PENDING_KEYS) >= required:
+        batch = PENDING_KEYS[:required]
         if post_private_keys(batch):
-            PENDING_KEYS = PENDING_KEYS[10:]
+            PENDING_KEYS = PENDING_KEYS[required:]
             posted = True
             _save_pending_keys()
         else:
             _save_pending_keys()
             time.sleep(30)
+    # Try a final post with fillers if we have some keys but fewer than required
+    if not posted and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
+        fillers = _generate_filler_keys(required - len(PENDING_KEYS), CURRENT_RANGE_START, CURRENT_RANGE_END, exclude=PENDING_KEYS)
+        batch = PENDING_KEYS + fillers
+        if len(batch) == required:
+            if post_private_keys(batch):
+                PENDING_KEYS = []
+                posted = True
+                _save_pending_keys()
+            else:
+                time.sleep(30)
     return posted
 
 def handle_next_block_immediately():
@@ -205,6 +231,14 @@ def handle_next_block_immediately():
     keyspace = f"{start_hex}:{end_hex}"
     global previous_keyspace
     previous_keyspace = keyspace
+    # Track current dynamic requirements
+    try:
+        global CURRENT_ADDR_COUNT, CURRENT_RANGE_START, CURRENT_RANGE_END
+        CURRENT_ADDR_COUNT = int(len(addresses) or 10)
+        CURRENT_RANGE_START = start_hex
+        CURRENT_RANGE_END = end_hex
+    except Exception:
+        pass
     save_addresses_to_in_file(addresses, ADDITIONAL_ADDRESSES)
     run_external_program(start_hex, end_hex)
     return True
@@ -472,11 +506,8 @@ def post_private_keys(private_keys):
         "ngrok-skip-browser-warning": "true",
         "User-Agent": "unitead-gpu-script/1.0"
     }
-    if len(private_keys) != 10:
-        logger("Warning", f"Batch ignored: exactly 10 keys required, got {len(private_keys)}")
-        return False
     data = {"privateKeys": private_keys}
-    logger("Info", "Posting batch of 10 private keys to API.")
+    logger("Info", f"Posting batch of {len(private_keys)} private keys to API.")
     
     try:
         response = requests.post(API_URL+"/submit", headers=headers, json=data, timeout=10)
@@ -725,6 +756,39 @@ def process_out_file():
 
     return False # Indicates the additional address key was NOT found
 
+# ----------------------------------------------------------------------------------------------
+
+def _pad64_hex(n):
+    try:
+        h = hex(n)[2:]
+        return ("0x" + h.zfill(64))
+    except Exception:
+        return None
+
+def _generate_filler_keys(count, start_hex, end_hex, exclude=None):
+    try:
+        exclude_set = set([e.lower().replace("0x", "") for e in (exclude or [])])
+        start = int(start_hex, 16)
+        end = int(end_hex, 16)
+        span = end - start
+        if span <= 0 or count <= 0:
+            return []
+        out = []
+        attempts = 0
+        import secrets
+        while len(out) < count and attempts < count * 100:
+            rnd = secrets.token_bytes(32)
+            rnd_int = int.from_bytes(rnd, "big")
+            offset = rnd_int % span
+            val = start + offset
+            h = hex(val)[2:].zfill(64)
+            if h not in exclude_set and h not in out:
+                out.append("0x" + h)
+            attempts += 1
+        return out
+    except Exception:
+        return []
+
 # ==============================================================================================
 #                                    MAIN LOOP
 # ==============================================================================================
@@ -770,6 +834,14 @@ if __name__ == "__main__":
             previous_keyspace = current_keyspace
             update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": GPU_INDEX})
             logger("Info", f"New block notification sent: {current_keyspace}")
+
+        # Track current dynamic requirements
+        try:
+            CURRENT_ADDR_COUNT = int(len(addresses) or 10)
+            CURRENT_RANGE_START = start_hex
+            CURRENT_RANGE_END = end_hex
+        except Exception:
+            pass
 
         # 3. Save addresses to in.txt
         save_addresses_to_in_file(addresses, ADDITIONAL_ADDRESSES)
