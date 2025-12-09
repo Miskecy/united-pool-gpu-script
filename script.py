@@ -166,21 +166,35 @@ def _retry_pending_keys_now():
     required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
     while len(PENDING_KEYS) >= required:
         batch = PENDING_KEYS[:required]
-        if post_private_keys(batch):
+        _res = post_private_keys(batch)
+        _ok = _res[0] if isinstance(_res, tuple) else bool(_res)
+        _incomp = _res[1] if isinstance(_res, tuple) else False
+        if _ok:
             PENDING_KEYS = PENDING_KEYS[required:]
             posted = True
             _save_pending_keys()
         else:
-            _save_pending_keys()
-            break
+            if _incomp:
+                PENDING_KEYS = []
+                _save_pending_keys()
+                break
+            else:
+                _save_pending_keys()
+                break
     # If we have some keys but fewer than required, try filling with randoms in current range
     if not posted and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
         fillers = _generate_filler_keys(required - len(PENDING_KEYS), CURRENT_RANGE_START, CURRENT_RANGE_END, exclude=PENDING_KEYS)
         batch = PENDING_KEYS + fillers
         if len(batch) == required:
-            if post_private_keys(batch):
+            _res = post_private_keys(batch)
+            _ok = _res[0] if isinstance(_res, tuple) else bool(_res)
+            _incomp = _res[1] if isinstance(_res, tuple) else False
+            if _ok:
                 PENDING_KEYS = []
                 posted = True
+                _save_pending_keys()
+            elif _incomp:
+                PENDING_KEYS = []
                 _save_pending_keys()
     return posted
 
@@ -202,24 +216,39 @@ def flush_pending_keys_blocking():
     required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
     while len(PENDING_KEYS) >= required:
         batch = PENDING_KEYS[:required]
-        if post_private_keys(batch):
+        _res = post_private_keys(batch)
+        _ok = _res[0] if isinstance(_res, tuple) else bool(_res)
+        _incomp = _res[1] if isinstance(_res, tuple) else False
+        if _ok:
             PENDING_KEYS = PENDING_KEYS[required:]
             posted = True
             _save_pending_keys()
         else:
-            _save_pending_keys()
-            time.sleep(30)
+            if _incomp:
+                PENDING_KEYS = []
+                _save_pending_keys()
+                break
+            else:
+                _save_pending_keys()
+                time.sleep(30)
     # Try a final post with fillers if we have some keys but fewer than required
     if not posted and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
         fillers = _generate_filler_keys(required - len(PENDING_KEYS), CURRENT_RANGE_START, CURRENT_RANGE_END, exclude=PENDING_KEYS)
         batch = PENDING_KEYS + fillers
         if len(batch) == required:
-            if post_private_keys(batch):
+            _res = post_private_keys(batch)
+            _ok = _res[0] if isinstance(_res, tuple) else bool(_res)
+            _incomp = _res[1] if isinstance(_res, tuple) else False
+            if _ok:
                 PENDING_KEYS = []
                 posted = True
                 _save_pending_keys()
             else:
-                time.sleep(30)
+                if _incomp:
+                    PENDING_KEYS = []
+                    _save_pending_keys()
+                else:
+                    time.sleep(30)
     return posted
 
 def handle_next_block_immediately():
@@ -586,12 +615,43 @@ def post_private_keys(private_keys):
     logger("Info", f"Posting batch of {len(private_keys)} private keys to API.")
     
     try:
-        response = requests.post(API_URL+"/submit", headers=headers, json=data, timeout=10)
+        url = API_URL+"/submit"
+        response = requests.post(url, headers=headers, json=data, timeout=10)
         if response.status_code == 200:
             logger("Success", "Private keys posted successfully.")
             update_status({"last_batch": f"Sent {len(private_keys)} keys"})
-            return True
+            return (True, False)
         else:
+            txt = ""
+            try:
+                txt = (response.text or "").strip()
+            except Exception:
+                txt = ""
+            msg = txt.lower()
+            is_incompatible = ("incompatible privatekeys" in msg) or ("incompatible private keys" in msg)
+            if not is_incompatible:
+                try:
+                    js = response.json()
+                    em = str(js.get("error", "")).lower()
+                    if em:
+                        is_incompatible = ("incompatible privatekeys" in em) or ("incompatible private keys" in em)
+                except Exception:
+                    pass
+            if is_incompatible:
+                attempts = 1
+                while attempts < 3:
+                    try:
+                        r2 = requests.post(url, headers=headers, json=data, timeout=10)
+                        if r2.status_code == 200:
+                            logger("Success", "Private keys posted successfully.")
+                            update_status({"last_batch": f"Sent {len(private_keys)} keys"})
+                            return (True, False)
+                    except requests.RequestException:
+                        pass
+                    attempts += 1
+                update_status_rl({"last_batch": "Incompatible privatekeys"}, "post_incompatible", 300)
+                logger("Error", "API reports incompatible privatekeys after 3 attempts.")
+                return (False, True)
             snippet = ""
             try:
                 snippet = (response.text or "")[:120].replace("\n", " ")
@@ -601,11 +661,11 @@ def post_private_keys(private_keys):
             if snippet:
                 logger("Info", f"Detail: {snippet}...")
             update_status_rl({"last_batch": f"Failed status {response.status_code}"}, "post_error", 300)
-            return False
+            return (False, False)
     except requests.RequestException as e:
         logger("Error", f"Connection error while sending batch: {type(e).__name__}. Retrying in 30s.")
         update_status_rl({"last_batch": f"Connection error {type(e).__name__}"}, "post_network_error", 300)
-        return False
+        return (False, False)
 
 # ==============================================================================================
 #                                    MAIN WORK FUNCTIONS
