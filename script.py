@@ -781,19 +781,37 @@ def run_external_program(start_hex, end_hex):
     try:
         # Use Popen to run the process and access real-time I/O streams
         with subprocess.Popen(
-            command, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.STDOUT, 
-            text=True, 
-            bufsize=1 
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         ) as process:
-            
-            # Read and display subprocess output line by line
-            for line in process.stdout:
-                # Real-time feedback
-                print(f"{Fore.CYAN}  > {line.strip()}{Style.RESET_ALL}", flush=True)
+            # Compact progress lines onto a single updating line
+            last_dyn_len = 0
+            progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
 
-            # Espera o processo terminar e verifica o código de retorno
+            for raw in process.stdout:
+                msg = raw.rstrip("\n")
+                txt = msg.strip()
+                if progress_re.match(txt):
+                    display = f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}"
+                    pad = max(0, last_dyn_len - len(display))
+                    sys.stdout.write("\r" + display + (" " * pad))
+                    sys.stdout.flush()
+                    last_dyn_len = len(display)
+                else:
+                    if last_dyn_len:
+                        sys.stdout.write("\r" + (" " * last_dyn_len) + "\r")
+                        sys.stdout.flush()
+                        last_dyn_len = 0
+                    print(f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}", flush=True)
+
+            if last_dyn_len:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+
+            # Wait for the process to finish and check the return code
             return_code = process.wait()
 
             if return_code == 0:
