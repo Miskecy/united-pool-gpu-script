@@ -38,6 +38,7 @@ BLOCK_LENGTH = ""
 APP_PATH = ""
 APP_ARGS = ""
 GPU_INDEX = "0"
+GPU_IDS = ""
 BITCRACK_PATH = ""
 BITCRACK_ARGS = ""
 AUTO_SWITCH = False
@@ -55,7 +56,7 @@ LAST_MESSAGE_HASH = None
 
 def _apply_settings(s):
     global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_URL, POOL_TOKEN, ADDITIONAL_ADDRESSES, BLOCK_LENGTH
-    global APP_PATH, APP_ARGS, GPU_INDEX, PROGRAM_BASE_COMMAND, WORKER_NAME, ONE_SHOT
+    global APP_PATH, APP_ARGS, GPU_INDEX, GPU_IDS, PROGRAM_BASE_COMMAND, WORKER_NAME, ONE_SHOT
     global BITCRACK_PATH, BITCRACK_ARGS, AUTO_SWITCH, GPU_COUNT
     global POST_BLOCK_DELAY_SECONDS, POST_BLOCK_DELAY_ENABLED
     TELEGRAM_BOT_TOKEN = s.get("telegram_accesstoken", "")
@@ -75,6 +76,19 @@ def _apply_settings(s):
     APP_ARGS = s.get("vanitysearch_arguments", s.get("app_arguments", ""))
     GPU_INDEX = str(s.get("gpu_index", 0))
     GPU_COUNT = int(s.get("gpu_count", 1) or 1)
+    ids_raw = s.get("gpu_ids", "")
+    if isinstance(ids_raw, list):
+        try:
+            GPU_IDS = ",".join(str(int(i)) for i in ids_raw)
+        except Exception:
+            GPU_IDS = ",".join(str(i) for i in ids_raw)
+    else:
+        GPU_IDS = str(ids_raw or "").strip()
+    if not GPU_IDS and GPU_COUNT > 1:
+        try:
+            GPU_IDS = ",".join(str(i) for i in range(GPU_COUNT))
+        except Exception:
+            GPU_IDS = ""
     WORKER_NAME = s.get("worker_name", "") or s.get("workername", "")
     ONE_SHOT = bool(s.get("oneshot", False))
     BITCRACK_PATH = s.get("bitcrack_path", "")
@@ -84,7 +98,6 @@ def _apply_settings(s):
         APP_PATH,
         "-t", "0",
         "-gpu",
-        "-gpuId", GPU_INDEX,
         "-i", IN_FILE,
         "-o", OUT_FILE,
     ]
@@ -708,6 +721,41 @@ def clean_out_file():
 
 # ----------------------------------------------------------------------------------------------
 
+def _gpu_out_path(i):
+    return f"out_gpu_{i}.txt"
+
+def _split_keyspace(start_hex, end_hex, parts):
+    try:
+        s = int(str(start_hex), 16)
+        e = int(str(end_hex), 16)
+        if e <= s or parts <= 1:
+            return [(str(start_hex), str(end_hex))]
+        length = e - s
+        segments = []
+        for i in range(parts):
+            si = s + (length * i) // parts
+            ei = s + (length * (i + 1)) // parts
+            if i == parts - 1:
+                ei = e
+            segments.append((f"{si:x}", f"{ei:x}"))
+        return segments
+    except Exception:
+        return [(str(start_hex), str(end_hex))]
+
+def _combine_gpu_out_files(count):
+    try:
+        with open(OUT_FILE, "w") as out:
+            for i in range(count):
+                p = _gpu_out_path(i)
+                if os.path.exists(p):
+                    try:
+                        with open(p, "r") as f:
+                            out.write(f.read())
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
 def _parse_length_to_count(s):
     try:
         if not s:
@@ -752,18 +800,166 @@ def run_external_program(start_hex, end_hex):
         chosen = "vanity"
 
     if chosen == "vanity":
-        base = [
-            APP_PATH,
-            "-t", "0",
-            "-gpu",
-            "-i", IN_FILE,
-            "-o", OUT_FILE,
-        ]
-        if GPU_COUNT <= 1:
+        if GPU_IDS:
+            base = [
+                APP_PATH,
+                "-t", "0",
+                "-gpu", GPU_IDS,
+                "-i", IN_FILE,
+                "-o", OUT_FILE,
+            ]
+            if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+                base += shlex.split(APP_ARGS)
+            command = base + ["--keyspace", keyspace]
+            clean_out_file()
+            logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
+            try:
+                with subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                ) as process:
+                    last_dyn_len = 0
+                    progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
+                    for raw in process.stdout:
+                        msg = raw.rstrip("\n")
+                        txt = msg.strip()
+                        if progress_re.match(txt):
+                            display = f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}"
+                            pad = max(0, last_dyn_len - len(display))
+                            sys.stdout.write("\r" + display + (" " * pad))
+                            sys.stdout.flush()
+                            last_dyn_len = len(display)
+                        else:
+                            if last_dyn_len:
+                                sys.stdout.write("\r" + (" " * last_dyn_len) + "\r")
+                                sys.stdout.flush()
+                                last_dyn_len = 0
+                            print(f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}", flush=True)
+                    if last_dyn_len:
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                    return_code = process.wait()
+                    if return_code == 0:
+                        logger("Success", "External program finished successfully")
+                        return True
+                    else:
+                        logger("Error", f"External program failed with return code: {return_code}")
+                        return False
+            except FileNotFoundError:
+                logger("Error", "External program not found. Check path and permissions.")
+                return False
+            except Exception as e:
+                logger("Error", f"Exception while executing: {e}")
+                return False
+        elif GPU_COUNT <= 1:
+            base = [
+                APP_PATH,
+                "-t", "0",
+                "-gpu",
+                "-i", IN_FILE,
+                "-o", OUT_FILE,
+            ]
             base += ["-gpuId", GPU_INDEX]
-        if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-            base += shlex.split(APP_ARGS)
-        command = base + ["--keyspace", keyspace]
+            if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+                base += shlex.split(APP_ARGS)
+            command = base + ["--keyspace", keyspace]
+            clean_out_file()
+            logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
+            try:
+                with subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                ) as process:
+                    last_dyn_len = 0
+                    progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
+                    for raw in process.stdout:
+                        msg = raw.rstrip("\n")
+                        txt = msg.strip()
+                        if progress_re.match(txt):
+                            display = f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}"
+                            pad = max(0, last_dyn_len - len(display))
+                            sys.stdout.write("\r" + display + (" " * pad))
+                            sys.stdout.flush()
+                            last_dyn_len = len(display)
+                        else:
+                            if last_dyn_len:
+                                sys.stdout.write("\r" + (" " * last_dyn_len) + "\r")
+                                sys.stdout.flush()
+                                last_dyn_len = 0
+                            print(f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}", flush=True)
+                    if last_dyn_len:
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                    return_code = process.wait()
+                    if return_code == 0:
+                        logger("Success", "External program finished successfully")
+                        return True
+                    else:
+                        logger("Error", f"External program failed with return code: {return_code}")
+                        return False
+            except FileNotFoundError:
+                logger("Error", "External program not found. Check path and permissions.")
+                return False
+            except Exception as e:
+                logger("Error", f"Exception while executing: {e}")
+                return False
+        else:
+            segments = _split_keyspace(start_hex, end_hex, GPU_COUNT)
+            for i in range(GPU_COUNT):
+                try:
+                    with open(_gpu_out_path(i), "w"):
+                        pass
+                except Exception:
+                    pass
+            procs = []
+            for idx, seg in enumerate(segments):
+                s_hex, e_hex = seg
+                ks = f"{s_hex}:{e_hex}"
+                out_path = _gpu_out_path(idx)
+                base = [
+                    APP_PATH,
+                    "-t", "0",
+                    "-gpu",
+                    "-gpuId", str(idx),
+                    "-i", IN_FILE,
+                    "-o", out_path,
+                ]
+                if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+                    base += shlex.split(APP_ARGS)
+                cmd = base + ["--keyspace", ks]
+                try:
+                    p = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                    )
+                    procs.append((idx, p))
+                except Exception as e:
+                    logger("Error", f"Failed to start GPU {idx}: {e}")
+            logger("Info", f"Running multi-GPU with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
+            ok = True
+            for idx, p in procs:
+                try:
+                    for raw in p.stdout:
+                        txt = (raw or "").strip()
+                        if txt:
+                            print(f"{Fore.CYAN}  > [GPU {idx}] {txt}{Style.RESET_ALL}", flush=True)
+                    rc = p.wait()
+                    if rc != 0:
+                        ok = False
+                except Exception as e:
+                    logger("Error", f"GPU {idx} execution error: {e}")
+                    ok = False
+            _combine_gpu_out_files(GPU_COUNT)
+            return ok
     else:
         base = [
             BITCRACK_PATH,
@@ -775,9 +971,7 @@ def run_external_program(start_hex, end_hex):
             base += shlex.split(BITCRACK_ARGS)
         command = base + ["--keyspace", keyspace]
     clean_out_file()
-    
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
-
     try:
         with subprocess.Popen(
             command,
@@ -788,7 +982,6 @@ def run_external_program(start_hex, end_hex):
         ) as process:
             last_dyn_len = 0
             progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
-
             for raw in process.stdout:
                 msg = raw.rstrip("\n")
                 txt = msg.strip()
@@ -804,20 +997,16 @@ def run_external_program(start_hex, end_hex):
                         sys.stdout.flush()
                         last_dyn_len = 0
                     print(f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}", flush=True)
-
             if last_dyn_len:
                 sys.stdout.write("\n")
                 sys.stdout.flush()
-
             return_code = process.wait()
-
             if return_code == 0:
                 logger("Success", "External program finished successfully")
                 return True
             else:
                 logger("Error", f"External program failed with return code: {return_code}")
                 return False
-
     except FileNotFoundError:
         logger("Error", "External program not found. Check path and permissions.")
         return False
@@ -987,7 +1176,11 @@ if __name__ == "__main__":
         # 2. New: New block notification logic
         if current_keyspace != previous_keyspace:
             previous_keyspace = current_keyspace
-            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": GPU_INDEX})
+            try:
+                gpu_label = GPU_INDEX if GPU_COUNT <= 1 else (GPU_IDS or ",".join(str(i) for i in range(GPU_COUNT)))
+            except Exception:
+                gpu_label = str(GPU_INDEX)
+            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label})
             logger("Info", f"New block notification sent: {current_keyspace}")
 
         # Track current dynamic requirements
