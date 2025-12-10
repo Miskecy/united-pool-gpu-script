@@ -779,7 +779,6 @@ def run_external_program(start_hex, end_hex):
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
 
     try:
-        # Use Popen to run the process and access real-time I/O streams
         with subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -787,7 +786,6 @@ def run_external_program(start_hex, end_hex):
             text=True,
             bufsize=1,
         ) as process:
-            # Compact progress lines onto a single updating line
             last_dyn_len = 0
             progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
 
@@ -811,7 +809,6 @@ def run_external_program(start_hex, end_hex):
                 sys.stdout.write("\n")
                 sys.stdout.flush()
 
-            # Wait for the process to finish and check the return code
             return_code = process.wait()
 
             if return_code == 0:
