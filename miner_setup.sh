@@ -15,6 +15,6 @@ sudo apt install libcudart11.0 -y
 echo "Cloning the repository..."
 git clone https://github.com/Miskecy/united-pool-gpu-script
 cd united-pool-gpu-script
-chmod +x vanitysearch86.sh
+chmod +x vanitysearch86
 
 echo "Setup complete. The repository has been cloned."
