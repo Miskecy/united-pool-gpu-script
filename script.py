@@ -188,14 +188,13 @@ def _detect_gpu_label():
 
 def _program_label():
     try:
-        b = os.path.basename(APP_PATH or "").lower()
-        if "bitcrack" in b:
-            return "BitCrack"
-        if ("vanitysearch-v2" in b) or ("vanitysearch-v3" in b):
-            return "VanitySearch-v3"
-        if "vanitysearch" in b:
-            return "VanitySearch"
-        raw = (PROGRAM_KIND or "").strip().lower()
+        path = APP_PATH or ""
+        if path:
+            base = os.path.basename(path)
+            name, _ext = os.path.splitext(base)
+            return name or base or "-"
+        raw = (PROGRAM_KIND or "").strip()
+        return raw or "-"
     except Exception:
         return "-"
 

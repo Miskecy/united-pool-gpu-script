@@ -98,7 +98,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     -   `✅ Blocks: <code>count</code>`
     -   `🔁 Consecutive: <code>count</code>`
     -   `⚙️ GPU: <code>gpu_name</code>`
-    -   `🧠 Algorithm: <code>VanitySearch | VanitySearch-V2 | BitCrack</code>`
+    -   `🧠 Algorithm: <code>executable_basename</code>`
     -   `🧭 Range: <code>start:end</code>`
     -   `📫 Addresses: <code>count</code>`
     -   `📦 Pending Keys: <code>count</code>`
@@ -141,7 +141,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 ### GPU and Algorithm Detection
 
 -   GPU name is detected by invoking your configured program with the `-l` flag and selecting the `GPU #<gpuId>` line, where `<gpuId>` is taken from `program_arguments` (e.g., `-gpuId 0`). The detected name is cached per run.
--   The Algorithm label is derived from either the executable path (`program_path`) or `program_name` and displays one of `VanitySearch`, `VanitySearch-V2`, or `BitCrack`.
+-   The Algorithm label is derived directly from the executable file name (`program_path` basename, without extension). Name it as you prefer (e.g., `VanitySearch`, `VanitySearch-V2`, `BitCrack`).
 -   For `api_url`, surrounding backticks and whitespace are trimmed automatically if present.
 
 ---
