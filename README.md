@@ -12,19 +12,19 @@ The script is configured using the `settings.json` file.
 
 ### Key Fields (Simplified)
 
-| Field Name            | Description                                                                                     | Example Value                                      |
-| :-------------------- | :---------------------------------------------------------------------------------------------- | :------------------------------------------------- |
-| `api_url`             | API base URL for fetching work blocks and posting results                                       | `https://unitedpuzzlepool.com/api/block`           |
-| `user_token`          | Pool token for worker authentication                                                            | `a1b2c3d4e5f6`                                     |
-| `worker_name`         | Human‑readable worker label used in Telegram                                                    | `GPU-Rig-01`                                       |
-| `additional_addresses`| Optional list of target addresses to stop on                                                    | `["1AbCd..."]`                                    |
-| `program_path`        | Path to the cracking program binary                                                              | `./VanitySearch-V2`                                |
-| `program_arguments`   | Extra CLI arguments passed through verbatim                                                      | `-g 1792,512`                                       |
-| `program_name`        | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v2` (lowercase)                 | `vanitysearch-v2`                                  |
-| `block_length`        | Requested block size (supports `K/M/B/T` suffixes)                                              | `1T`                                               |
-| `oneshot`             | Run a single cycle and exit                                                                     | `false`                                            |
-| `post_block_delay_enabled` | Enable delay between blocks                                                              | `true`                                             |
-| `post_block_delay_minutes` | Delay between iterations in minutes                                                       | `2`                                                |
+| Field Name                 | Description                                                                     | Example Value                            |
+| :------------------------- | :------------------------------------------------------------------------------ | :--------------------------------------- |
+| `api_url`                  | API base URL for fetching work blocks and posting results                       | `https://unitedpuzzlepool.com/api/block` |
+| `user_token`               | Pool token for worker authentication                                            | `a1b2c3d4e5f6`                           |
+| `worker_name`              | Human‑readable worker label used in Telegram                                    | `GPU-Rig-01`                             |
+| `additional_addresses`     | Optional list of target addresses to stop on                                    | `["1AbCd..."]`                           |
+| `program_path`             | Path to the cracking program binary                                             | `./VanitySearch-V2`                      |
+| `program_arguments`        | Extra CLI arguments passed through verbatim                                     | `-g 1792,512`                            |
+| `program_name`             | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v2` (lowercase) | `vanitysearch-v2`                        |
+| `block_length`             | Requested block size (supports `K/M/B/T` suffixes)                              | `1T`                                     |
+| `oneshot`                  | Run a single cycle and exit                                                     | `false`                                  |
+| `post_block_delay_enabled` | Enable delay between blocks                                                     | `true`                                   |
+| `post_block_delay_minutes` | Delay between iterations in minutes                                             | `2`                                      |
 
 ---
 
