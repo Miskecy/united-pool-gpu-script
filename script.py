@@ -142,6 +142,7 @@ PENDING_KEYS_FILE = "pending_keys.json"
 LAST_POST_ATTEMPT = 0
 ALL_BLOCKS_SOLVED = False
 PROCESSED_ONE_BLOCK = False
+NEED_NEW_BLOCK_FETCH = False
 
 GPU_LABEL_CACHE = None
 
@@ -238,7 +239,7 @@ def _save_pending_keys():
         pass
 
 def _retry_pending_keys_now():
-    global PENDING_KEYS
+    global PENDING_KEYS, NEED_NEW_BLOCK_FETCH
     posted = False
     required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
     while len(PENDING_KEYS) >= required:
@@ -254,6 +255,7 @@ def _retry_pending_keys_now():
             if _incomp:
                 PENDING_KEYS = []
                 _save_pending_keys()
+                NEED_NEW_BLOCK_FETCH = True
                 break
             else:
                 _save_pending_keys()
@@ -273,6 +275,7 @@ def _retry_pending_keys_now():
             elif _incomp:
                 PENDING_KEYS = []
                 _save_pending_keys()
+                NEED_NEW_BLOCK_FETCH = True
     return posted
 
 def _scheduled_pending_post_retry():
@@ -288,7 +291,7 @@ def _scheduled_pending_post_retry():
             logger("Warning", "API unavailable. Keeping keys and retrying in 30s.")
 
 def flush_pending_keys_blocking():
-    global PENDING_KEYS
+    global PENDING_KEYS, NEED_NEW_BLOCK_FETCH
     posted = False
     required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
     while len(PENDING_KEYS) >= required:
@@ -304,6 +307,7 @@ def flush_pending_keys_blocking():
             if _incomp:
                 PENDING_KEYS = []
                 _save_pending_keys()
+                NEED_NEW_BLOCK_FETCH = True
                 break
             else:
                 _save_pending_keys()
@@ -324,6 +328,7 @@ def flush_pending_keys_blocking():
                 if _incomp:
                     PENDING_KEYS = []
                     _save_pending_keys()
+                    NEED_NEW_BLOCK_FETCH = True
                 else:
                     time.sleep(30)
     return posted
@@ -655,13 +660,21 @@ def post_private_keys(private_keys):
             except Exception:
                 txt = ""
             msg = txt.lower()
-            is_incompatible = ("incompatible privatekeys" in msg) or ("incompatible private keys" in msg)
+            is_incompatible = (
+                ("incompatible privatekeys" in msg) or
+                ("incompatible private keys" in msg) or
+                ("not all private keys are correct" in msg)
+            )
             if not is_incompatible:
                 try:
                     js = response.json()
                     em = str(js.get("error", "")).lower()
                     if em:
-                        is_incompatible = ("incompatible privatekeys" in em) or ("incompatible private keys" in em)
+                        is_incompatible = (
+                            ("incompatible privatekeys" in em) or
+                            ("incompatible private keys" in em) or
+                            ("not all private keys are correct" in em)
+                        )
                 except Exception:
                     pass
             if is_incompatible:
@@ -955,6 +968,11 @@ if __name__ == "__main__":
     while True:
         refresh_settings()
         flush_pending_keys_blocking()
+        if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
+            NEED_NEW_BLOCK_FETCH = False
+            update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": 0})
+            logger("Info", "Incompatible keys detected and cleared. Fetching a new block immediately.")
+            continue
         if ONE_SHOT and PROCESSED_ONE_BLOCK:
             logger("Info", "One-shot mode enabled. Exiting after first block.")
             break
@@ -1022,6 +1040,11 @@ if __name__ == "__main__":
             break
 
         flush_pending_keys_blocking()
+        if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
+            NEED_NEW_BLOCK_FETCH = False
+            update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": 0})
+            logger("Info", "Incompatible keys detected and cleared. Fetching a new block immediately.")
+            continue
         if ONE_SHOT:
             logger("Info", "One-shot mode enabled. Exiting after first block.")
             break
