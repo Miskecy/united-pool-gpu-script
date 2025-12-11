@@ -99,6 +99,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     -   `🔁 Consecutive: <code>count</code>`
     -   `⚙️ GPU: <code>gpu_name</code>`
     -   `🧠 Algorithm: <code>executable_basename</code>`
+    -   `🔧 Args: <code>executable_arguments</code>`
     -   `🧭 Range: <code>start:end</code>`
     -   `📫 Addresses: <code>count</code>`
     -   `📦 Pending Keys: <code>count</code>`
@@ -121,6 +122,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 🔁 Consecutive: 1
 ⚙️ GPU: NVIDIA GeForce RTX 3090 Ti
 🧠 Algorithm: VanitySearch-V3
+🔧 Args: -gpu -gpuId 0 -g 1792,512
 🧭 Range: 75760acbd8897d9fe9:75760ace93076ccfe9
 📫 Addresses: 10
 📦 Pending Keys: 0
