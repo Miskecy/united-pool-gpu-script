@@ -10,11 +10,6 @@ sudo apt update
 # The -y flag confirms the installation without prompting
 sudo apt install libcudart11.0 -y
 
-# 3. Clone the Git repository
-# This will create a new directory named 'united-pool-gpu-script'
-echo "Cloning the repository..."
-git clone https://github.com/Miskecy/united-pool-gpu-script
-cd united-pool-gpu-script
-chmod +x vanitysearch86
+sudo chmod +x ./bin/*
 
 echo "Setup complete. The repository has been cloned."
