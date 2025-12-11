@@ -179,7 +179,7 @@ Notes:
 -   `KEYFOUND.txt`: Stores `addr:priv` pairs when an `additional_address` key is successfully found.
 -   `pending_keys.json`: Queue of private keys awaiting batch submission to the API. Flushed in dynamic batches (10–30), with range‑safe filler keys automatically added when the queue is short; cleared after **3 failed retries** on API "incompatible privatekeys" responses.
 -   `telegram_state.json`: Persists the Telegram `message_id` per worker to enable single‑message editing across restarts.
--   `telegram_status.py`: External module that manages Telegram status creation/editing and notifications.
+    -   `telegram_status.py`: External module that manages Telegram status creation/editing and notifications.
 
 ### API Payload Format (privateKeys)
 
@@ -188,6 +188,80 @@ Notes:
 
 ### Output Parsing
 
--   `output_parsers.py` routes based on `program_name` and supports VanitySearch‑V2 padded formats.
--   For VanitySearch‑V3, lines like `Priv (HEX): 0x <padded hex>` are normalized to 64 hex characters.
+    -   `output_parsers.py` routes based on `program_name` and supports VanitySearch‑V2 padded formats.
+    -   For VanitySearch‑V3, lines like `Priv (HEX): 0x <padded hex>` are normalized to 64 hex characters.
     -   `bash safety_monitor.sh -g all`
+
+---
+
+## Bot Controller
+
+The repository includes an optional Telegram‑based controller (`bot_controller.py`) that listens for commands and controls the worker script (`script.py`). It requires a Telegram bot token and chat ID and works alongside the existing status notifications.
+
+### Setup
+
+- Configure `settings.json`:
+  - `telegram_accesstoken`: your Telegram bot token
+  - `telegram_chatid`: your chat ID
+  - `worker_name`: human‑readable server name (used for targeting)
+- Start the controller:
+  ```bash
+  python bot_controller.py
+  ```
+
+### Server Targeting
+
+- Each machine derives its server name from `worker_name` (or `SERVER_NAME` env, or system `COMPUTERNAME/HOSTNAME`).
+- Set a target with `/server <name>` to apply commands only to matching servers.
+- Clear the target with `/cleartarget` to broadcast commands again.
+- Commands also accept an inline target: `/stopscript <name>`.
+
+### Server Discovery
+
+- Use `/serverlist` to discover available servers. The controller broadcasts presence and aggregates responses for a short window, then returns a formatted list.
+
+### Safety Behavior
+
+- If `bot_controller.py` exits unexpectedly or is stopped, it attempts to terminate any worker process it started. This prevents orphaned workers.
+
+### Commands
+
+- `/server <name>`: set target server name for subsequent commands.
+- `/cleartarget`: clear current target; broadcast commands to all.
+- `/startscript [name]`: start `script.py` on targeted servers.
+- `/stopscript [name]`: stop `script.py` on targeted servers.
+- `/restartscript [name]`: restart `script.py` on targeted servers.
+- `/status [name]`: show local status, server name, and current target.
+- `/whoami`: show local server name.
+- `/serverlist`: list discovered servers.
+- `/reloadsettings`: reload `settings.json` into the controller.
+- `/get <key>`: show the current value for `<key>`.
+- `/set <key> <value>`: update the value for `<key>`.
+
+### `/get` and `/set` Details
+
+- Available keys are derived from `settings.json` and typically include:
+  - `api_url`: API base URL
+  - `user_token`: pool token
+  - `worker_name`: server name
+  - `program_name`: program identifier
+  - `program_path`: executable path
+  - `program_arguments`: CLI arguments
+  - `block_length`: keyspace block size
+  - `oneshot`: single‑block mode (bool)
+  - `post_block_delay_enabled`: delay toggle (bool)
+  - `post_block_delay_minutes`: delay minutes
+  - `additional_addresses`: list of extra addresses
+  - `telegram_share`: share toggle (bool)
+  - `telegram_accesstoken`: bot token
+  - `telegram_chatid`: chat ID
+
+- Value parsing:
+  - `true`/`false` → booleans
+  - numeric strings → integers/floats
+  - JSON objects/arrays → parsed structures
+  - other → raw string
+
+### Help Output
+
+- The controller’s `/help` uses rich formatting (HTML) and includes targeting, worker control, settings management, and the dynamic list of available keys.
