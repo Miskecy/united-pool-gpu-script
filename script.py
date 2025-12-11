@@ -198,6 +198,13 @@ def _program_label():
     except Exception:
         return "-"
 
+def _status_program_args():
+    try:
+        s = (APP_ARGS or "").strip()
+        return s or "-"
+    except Exception:
+        return "-"
+
 STATUS = {
     "worker": "",
     "gpu": "",
@@ -982,7 +989,7 @@ if __name__ == "__main__":
             previous_keyspace = current_keyspace
             gpu_label = _detect_gpu_label()
             algo_label = _program_label()
-            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label})
+            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label, "arguments": _status_program_args()})
             logger("Info", f"New block notification sent: {current_keyspace}")
 
         # Track current dynamic requirements
