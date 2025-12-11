@@ -99,7 +99,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     -   `🔁 Consecutive: <code>count</code>`
     -   `⚙️ GPU: <code>gpu_name</code>`
     -   `🧠 Algorithm: <code>executable_basename</code>`
-    -   `🔧 Args: <code>-gpu -gpuId 0 -g 1792,512</code>`
+    -   `🔧 Args: <code>executable_arguments</code>`
     -   `🧭 Range: <code>start:end</code>`
     -   `📫 Addresses: <code>count</code>`
     -   `📦 Pending Keys: <code>count</code>`
