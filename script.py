@@ -143,6 +143,62 @@ LAST_POST_ATTEMPT = 0
 ALL_BLOCKS_SOLVED = False
 PROCESSED_ONE_BLOCK = False
 
+GPU_LABEL_CACHE = None
+
+def _detect_gpu_label():
+    global GPU_LABEL_CACHE
+    if GPU_LABEL_CACHE is not None:
+        return GPU_LABEL_CACHE
+    label = "-"
+    try:
+        if APP_PATH:
+            cmd = [APP_PATH, "-l"]
+            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p:
+                try:
+                    out, _ = p.communicate(timeout=10)
+                except Exception:
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+                    out = ""
+            lines = [ln.strip() for ln in (out or "").splitlines()]
+            target = None
+            gpu_id = 0
+            try:
+                m = re.search(r"-gpuId\s+(\d+)", str(APP_ARGS or ""))
+                if m:
+                    gpu_id = int(m.group(1))
+            except Exception:
+                gpu_id = 0
+            for ln in lines:
+                if re.match(rf"^\s*GPU\s*#?{gpu_id}\b", ln, re.IGNORECASE):
+                    target = ln.strip()
+                    break
+            if target:
+                name = target
+                idx = name.find("(")
+                if idx > 0:
+                    name = name[:idx].strip()
+                label = name
+    except Exception:
+        label = "-"
+    GPU_LABEL_CACHE = label
+    return label
+
+def _program_label():
+    try:
+        b = os.path.basename(APP_PATH or "").lower()
+        if "bitcrack" in b:
+            return "BitCrack"
+        if ("vanitysearch-v2" in b) or ("vanitysearch-v3" in b):
+            return "VanitySearch-v3"
+        if "vanitysearch" in b:
+            return "VanitySearch"
+        raw = (PROGRAM_KIND or "").strip().lower()
+    except Exception:
+        return "-"
+
 STATUS = {
     "worker": "",
     "gpu": "",
@@ -803,8 +859,8 @@ def process_out_file():
             bname = os.path.basename((APP_PATH or "").lower())
             if "bitcrack" in bname:
                 kind = "bitcrack"
-            elif "vanitysearch-v2" in bname or "vanitysearch2" in bname:
-                kind = "vanitysearch-v2"
+            elif "vanitysearch-v2" in bname or "vanitysearch-v3" in bname:
+                kind = "vanitysearch-v3"
             else:
                 kind = "vanity"
         keys_to_post, found_pairs = parse_out(content, kind, ADDITIONAL_ADDRESSES)
@@ -925,8 +981,9 @@ if __name__ == "__main__":
         # 2. New: New block notification logic
         if current_keyspace != previous_keyspace:
             previous_keyspace = current_keyspace
-            gpu_label = "-"
-            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label})
+            gpu_label = _detect_gpu_label()
+            algo_label = _program_label()
+            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label})
             logger("Info", f"New block notification sent: {current_keyspace}")
 
         # Track current dynamic requirements

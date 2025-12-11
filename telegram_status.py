@@ -165,6 +165,7 @@ def format_status_html(status):
     blocks = status.get("session_blocks", 0)
     consec = status.get("session_consecutive", 0)
     gpu = _escape_html(status.get("gpu", ""))
+    alg = _escape_html(status.get("algorithm", ""))
     rng = _escape_html(status.get("range", ""))
     addrs = status.get("addresses", 0)
     pending = status.get("pending_keys", 0)
@@ -180,6 +181,7 @@ def format_status_html(status):
         f"✅ <b>Blocks</b>: <code>{blocks}</code>",
         f"🔁 <b>Consecutive</b>: <code>{consec}</code>",
         f"⚙️ <b>GPU</b>: <code>{gpu}</code>",
+        f"🧠 <b>Algorithm</b>: <code>{alg}</code>",
         f"🧭 <b>Range</b>: <code>{rng}</code>",
         f"📫 <b>Addresses</b>: <code>{addrs}</code>",
         f"📦 <b>Pending Keys</b>: <code>{pending}</code>",

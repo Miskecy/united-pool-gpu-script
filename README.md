@@ -55,7 +55,7 @@ You need a pool token to authenticate your worker when requesting blocks.
 
 ### 🔄 Work Cycle
 
-1. **New Block Notification:** When a new block is fetched, the script notifies with the range, total addresses, and the GPU being used.
+1. **New Block Notification:** When a new block is fetched, the script notifies with the range, total addresses, the GPU being used, and the selected algorithm.
 2. **Key Cracking:** Executes the selected cracking software using the configured arguments.
 3. **Processing `out.txt`:**
     - **Target Key Found:** If a key for an **`additional_address`** is found:
@@ -97,7 +97,8 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     -   `⏳ Active: <code>duration</code>`
     -   `✅ Blocks: <code>count</code>`
     -   `🔁 Consecutive: <code>count</code>`
-    -   `⚙️ GPU: <code>gpu_index</code>`
+    -   `⚙️ GPU: <code>gpu_name</code>`
+    -   `🧠 Algorithm: <code>VanitySearch | VanitySearch-V2 | BitCrack</code>`
     -   `🧭 Range: <code>start:end</code>`
     -   `📫 Addresses: <code>count</code>`
     -   `📦 Pending Keys: <code>count</code>`
@@ -118,7 +119,8 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 ⏳ Active: 50 mins
 ✅ Blocks: 1
 🔁 Consecutive: 1
-⚙️ GPU: 0
+⚙️ GPU: NVIDIA GeForce RTX 3090 Ti
+🧠 Algorithm: VanitySearch-V3
 🧭 Range: 75760acbd8897d9fe9:75760ace93076ccfe9
 📫 Addresses: 10
 📦 Pending Keys: 0
@@ -135,6 +137,12 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 -   Category‑based rate limiting avoids noisy updates (e.g., API errors vs. normal status lines).
 -   HTML line breaks use real newlines (`\n`) and dynamic values are escaped to prevent parsing issues.
 -   On HTML errors during creation, the module falls back to plain‑text creation and continues editing thereafter.
+
+### GPU and Algorithm Detection
+
+-   GPU name is detected by invoking your configured program with the `-l` flag and selecting the `GPU #<gpuId>` line, where `<gpuId>` is taken from `program_arguments` (e.g., `-gpuId 0`). The detected name is cached per run.
+-   The Algorithm label is derived from either the executable path (`program_path`) or `program_name` and displays one of `VanitySearch`, `VanitySearch-V2`, or `BitCrack`.
+-   For `api_url`, surrounding backticks and whitespace are trimmed automatically if present.
 
 ---
 
@@ -179,5 +187,5 @@ Notes:
 ### Output Parsing
 
 -   `output_parsers.py` routes based on `program_name` and supports VanitySearch‑V2 padded formats.
--   For VanitySearch‑V2, lines like `Priv (HEX): 0x <padded hex>` are normalized to 64 hex characters.
+-   For VanitySearch‑V3, lines like `Priv (HEX): 0x <padded hex>` are normalized to 64 hex characters.
     -   `bash safety_monitor.sh -g all`
