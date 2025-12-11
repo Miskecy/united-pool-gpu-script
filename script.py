@@ -15,6 +15,14 @@ import shlex
 import re
 import uuid
 import hashlib
+from output_parsers import parse_out
+from telegram_status import (
+    configure_telegram,
+    update_status as _tg_update_status,
+    update_status_rl as _tg_update_status_rl,
+    send_notification as _tg_send,
+    send_notification_rl as _tg_send_rl,
+)
 
 def _load_settings():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,13 +45,7 @@ ADDITIONAL_ADDRESSES = []
 BLOCK_LENGTH = ""
 APP_PATH = ""
 APP_ARGS = ""
-GPU_INDEX = "0"
-GPU_IDS = ""
-BITCRACK_PATH = ""
-BITCRACK_ARGS = ""
-AUTO_SWITCH = False
-GPU_COUNT = 1
-PROGRAM_BASE_COMMAND = []
+PROGRAM_KIND = "vanity"
 WORKER_NAME = ""
 
 ONE_SHOT = False
@@ -56,12 +58,15 @@ LAST_MESSAGE_HASH = None
 
 def _apply_settings(s):
     global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_URL, POOL_TOKEN, ADDITIONAL_ADDRESSES, BLOCK_LENGTH
-    global APP_PATH, APP_ARGS, GPU_INDEX, GPU_IDS, PROGRAM_BASE_COMMAND, WORKER_NAME, ONE_SHOT
-    global BITCRACK_PATH, BITCRACK_ARGS, AUTO_SWITCH, GPU_COUNT
+    global APP_PATH, APP_ARGS, PROGRAM_KIND, WORKER_NAME, ONE_SHOT
     global POST_BLOCK_DELAY_SECONDS, POST_BLOCK_DELAY_ENABLED
     TELEGRAM_BOT_TOKEN = s.get("telegram_accesstoken", "")
     TELEGRAM_CHAT_ID = str(s.get("telegram_chatid", ""))
-    API_URL = s.get("api_url", "")
+    API_URL = str(s.get("api_url", ""))
+    try:
+        API_URL = API_URL.strip().strip("`")
+    except Exception:
+        pass
     POOL_TOKEN = s.get("user_token", "")
     addrs = s.get("additional_addresses", [])
     if isinstance(addrs, list):
@@ -72,37 +77,26 @@ def _apply_settings(s):
     if isinstance(legacy_addr, str) and legacy_addr.strip() and legacy_addr not in ADDITIONAL_ADDRESSES:
         ADDITIONAL_ADDRESSES.append(legacy_addr)
     BLOCK_LENGTH = s.get("block_length", "")
-    APP_PATH = s.get("vanitysearch_path", s.get("app_path", ""))
-    APP_ARGS = s.get("vanitysearch_arguments", s.get("app_arguments", ""))
-    GPU_INDEX = str(s.get("gpu_index", 0))
-    GPU_COUNT = int(s.get("gpu_count", 1) or 1)
-    ids_raw = s.get("gpu_ids", "")
-    if isinstance(ids_raw, list):
-        try:
-            GPU_IDS = ",".join(str(int(i)) for i in ids_raw)
-        except Exception:
-            GPU_IDS = ",".join(str(i) for i in ids_raw)
-    else:
-        GPU_IDS = str(ids_raw or "").strip()
-    if not GPU_IDS and GPU_COUNT > 1:
-        try:
-            GPU_IDS = ",".join(str(i) for i in range(GPU_COUNT))
-        except Exception:
-            GPU_IDS = ""
+    APP_PATH = s.get("program_path")
+    APP_ARGS = s.get("program_arguments")
+    PROGRAM_KIND = str(s.get("program_name", "")).strip().lower()
+    if PROGRAM_KIND and "|" in PROGRAM_KIND:
+        PROGRAM_KIND = PROGRAM_KIND.split("|")[0].strip().lower()
     WORKER_NAME = s.get("worker_name", "") or s.get("workername", "")
+    try:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        if APP_PATH and "|" in APP_PATH:
+            cands = [p.strip() for p in APP_PATH.split("|") if p.strip()]
+            for p in cands:
+                cand = p if os.path.isabs(p) else os.path.normpath(os.path.join(base_dir, p))
+                if os.path.exists(cand):
+                    APP_PATH = cand
+                    break
+        if APP_PATH and not os.path.isabs(APP_PATH):
+            APP_PATH = os.path.normpath(os.path.join(base_dir, APP_PATH))
+    except Exception:
+        pass
     ONE_SHOT = bool(s.get("oneshot", False))
-    BITCRACK_PATH = s.get("bitcrack_path", "")
-    BITCRACK_ARGS = s.get("bitcrack_arguments", "")
-    AUTO_SWITCH = bool(s.get("auto_switch", False))
-    PROGRAM_BASE_COMMAND = [
-        APP_PATH,
-        "-t", "0",
-        "-gpu",
-        "-i", IN_FILE,
-        "-o", OUT_FILE,
-    ]
-    if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-        PROGRAM_BASE_COMMAND += shlex.split(APP_ARGS)
     try:
         POST_BLOCK_DELAY_ENABLED = bool(s.get("post_block_delay_enabled", True))
     except Exception:
@@ -125,8 +119,16 @@ def _apply_settings(s):
 def refresh_settings():
     s = _load_settings()
     _apply_settings(s)
+    try:
+        configure_telegram(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, WORKER_NAME, TELEGRAM_STATE_FILE, logger)
+    except Exception:
+        pass
 
 _apply_settings(_SETTINGS)
+try:
+    configure_telegram(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, WORKER_NAME, TELEGRAM_STATE_FILE, logger)
+except Exception:
+    pass
 
 # Initialize colorama
 init(autoreset=True)
@@ -473,7 +475,7 @@ def edit_telegram_status(message):
         logger("Error", "Request error while editing Telegram message.")
 
 def send_telegram_notification(message):
-    edit_telegram_status(message)
+    _tg_send(message)
 
 def _escape_html(s):
     try:
@@ -483,42 +485,8 @@ def _escape_html(s):
         return ""
 
 def _format_status_html():
-    sid = _escape_html(STATUS.get("session_id", ""))
-    started = STATUS.get("session_started_ts", 0)
-    now_ts = time.time()
-    dur = int(max(0, now_ts - (started or 0)))
-    active = _escape_html(_format_duration(dur))
-    blocks = STATUS.get("session_blocks", 0)
-    consec = STATUS.get("session_consecutive", 0)
-    gpu = _escape_html(STATUS.get("gpu", ""))
-    rng = _escape_html(STATUS.get("range", ""))
-    addrs = STATUS.get("addresses", 0)
-    pending = STATUS.get("pending_keys", 0)
-    last_batch = _escape_html(STATUS.get("last_batch", "-"))
-    last_error = _escape_html(STATUS.get("last_error", "-"))
-    keyfound = _escape_html(STATUS.get("keyfound", "-"))
-    next_in = STATUS.get("next_fetch_in", 0)
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    lines = [
-        "📊 <b>Status</b>",
-        f"🧩 <b>Session</b>: <code>{sid}</code>",
-        f"⏳ <b>Active</b>: <code>{active}</code>",
-        f"✅ <b>Blocks</b>: <code>{blocks}</code>",
-        f"🔁 <b>Consecutive</b>: <code>{consec}</code>",
-        f"⚙️ <b>GPU</b>: <code>{gpu}</code>",
-        f"🧭 <b>Range</b>: <code>{rng}</code>",
-        f"📫 <b>Addresses</b>: <code>{addrs}</code>",
-        f"📦 <b>Pending Keys</b>: <code>{pending}</code>",
-        f"📤 <b>Last Batch</b>: <code>{last_batch}</code>",
-        f"❗ <b>Last Error</b>: <i>{last_error}</i>",
-        f"🔑 <b>Keyfound</b>: <code>{keyfound}</code>",
-        f"⏱️ <b>Next Fetch</b>: <code>{next_in}s</code>",
-        f"🕒 <i>Updated {ts}</i>",
-    ]
-    if STATUS.get("all_blocks_solved", False):
-        lines.append("🏁 <b>All blocks solved</b> ✅")
-    return "\n".join(lines)
+    from telegram_status import format_status_html as _fmt
+    return _fmt(STATUS)
 
 def _format_duration(seconds):
     s = int(max(0, seconds or 0))
@@ -544,33 +512,17 @@ def _format_duration(seconds):
     return " ".join(parts)
 
 def update_status(fields=None):
-    if fields:
-        for k, v in fields.items():
-            STATUS[k] = v
-    if not STATUS.get("gpu"):
-        STATUS["gpu"] = str(GPU_INDEX)
-    STATUS["updated_at"] = datetime.now().isoformat(timespec="seconds")
-    edit_telegram_status(_format_status_html())
+    _tg_update_status(STATUS, fields or {}, gpu_fallback="-")
 
 def update_status_rl(fields, category, min_interval):
-    now = time.time()
-    last = LAST_TELEGRAM_TS.get(category, 0)
-    if now - last < min_interval:
-        return
-    LAST_TELEGRAM_TS[category] = now
-    update_status(fields)
+    _tg_update_status_rl(STATUS, fields, category, min_interval, gpu_fallback="-")
 
 # ----------------------------------------------------------------------------------------------
 
 LAST_TELEGRAM_TS = {}
 
 def send_telegram_notification_rl(message, category, min_interval):
-    now = time.time()
-    last = LAST_TELEGRAM_TS.get(category, 0)
-    if now - last < min_interval:
-        return
-    LAST_TELEGRAM_TS[category] = now
-    send_telegram_notification(message)
+    _tg_send_rl(message, category, min_interval)
 
 def fetch_block_data():
     """
@@ -779,199 +731,12 @@ def _parse_length_to_count(s):
 def run_external_program(start_hex, end_hex):
     """Run external program with given keyspace and stream live feedback."""
     keyspace = f"{start_hex}:{end_hex}"
-    
-    requested_len = _parse_length_to_count(BLOCK_LENGTH)
-    try:
-        actual_len = int(end_hex, 16) - int(start_hex, 16)
-    except Exception:
-        actual_len = None
-    compare_len = requested_len if requested_len is not None else actual_len
-
-    chosen = "vanity"
-    if AUTO_SWITCH:
-        if GPU_COUNT > 1:
-            chosen = "vanity"
-        else:
-            if compare_len is not None and compare_len < 10**12 and BITCRACK_PATH:
-                chosen = "bitcrack"
-            else:
-                chosen = "vanity"
-    if chosen == "bitcrack" and not BITCRACK_PATH:
-        chosen = "vanity"
-
-    if chosen == "vanity":
-        if GPU_IDS:
-            base = [
-                APP_PATH,
-                "-t", "0",
-                "-gpu", GPU_IDS,
-                "-i", IN_FILE,
-                "-o", OUT_FILE,
-            ]
-            if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-                base += shlex.split(APP_ARGS)
-            command = base + ["--keyspace", keyspace]
-            clean_out_file()
-            logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
-            try:
-                with subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                ) as process:
-                    last_dyn_len = 0
-                    progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
-                    for raw in process.stdout:
-                        msg = raw.rstrip("\n")
-                        txt = msg.strip()
-                        if progress_re.match(txt):
-                            display = f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}"
-                            pad = max(0, last_dyn_len - len(display))
-                            sys.stdout.write("\r" + display + (" " * pad))
-                            sys.stdout.flush()
-                            last_dyn_len = len(display)
-                        else:
-                            if last_dyn_len:
-                                sys.stdout.write("\r" + (" " * last_dyn_len) + "\r")
-                                sys.stdout.flush()
-                                last_dyn_len = 0
-                            print(f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}", flush=True)
-                    if last_dyn_len:
-                        sys.stdout.write("\n")
-                        sys.stdout.flush()
-                    return_code = process.wait()
-                    if return_code == 0:
-                        logger("Success", "External program finished successfully")
-                        return True
-                    else:
-                        logger("Error", f"External program failed with return code: {return_code}")
-                        return False
-            except FileNotFoundError:
-                logger("Error", "External program not found. Check path and permissions.")
-                return False
-            except Exception as e:
-                logger("Error", f"Exception while executing: {e}")
-                return False
-        elif GPU_COUNT <= 1:
-            base = [
-                APP_PATH,
-                "-t", "0",
-                "-gpu",
-                "-i", IN_FILE,
-                "-o", OUT_FILE,
-            ]
-            base += ["-gpuId", GPU_INDEX]
-            if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-                base += shlex.split(APP_ARGS)
-            command = base + ["--keyspace", keyspace]
-            clean_out_file()
-            logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
-            try:
-                with subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                ) as process:
-                    last_dyn_len = 0
-                    progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
-                    for raw in process.stdout:
-                        msg = raw.rstrip("\n")
-                        txt = msg.strip()
-                        if progress_re.match(txt):
-                            display = f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}"
-                            pad = max(0, last_dyn_len - len(display))
-                            sys.stdout.write("\r" + display + (" " * pad))
-                            sys.stdout.flush()
-                            last_dyn_len = len(display)
-                        else:
-                            if last_dyn_len:
-                                sys.stdout.write("\r" + (" " * last_dyn_len) + "\r")
-                                sys.stdout.flush()
-                                last_dyn_len = 0
-                            print(f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}", flush=True)
-                    if last_dyn_len:
-                        sys.stdout.write("\n")
-                        sys.stdout.flush()
-                    return_code = process.wait()
-                    if return_code == 0:
-                        logger("Success", "External program finished successfully")
-                        return True
-                    else:
-                        logger("Error", f"External program failed with return code: {return_code}")
-                        return False
-            except FileNotFoundError:
-                logger("Error", "External program not found. Check path and permissions.")
-                return False
-            except Exception as e:
-                logger("Error", f"Exception while executing: {e}")
-                return False
-        else:
-            segments = _split_keyspace(start_hex, end_hex, GPU_COUNT)
-            for i in range(GPU_COUNT):
-                try:
-                    with open(_gpu_out_path(i), "w"):
-                        pass
-                except Exception:
-                    pass
-            procs = []
-            for idx, seg in enumerate(segments):
-                s_hex, e_hex = seg
-                ks = f"{s_hex}:{e_hex}"
-                out_path = _gpu_out_path(idx)
-                base = [
-                    APP_PATH,
-                    "-t", "0",
-                    "-gpu",
-                    "-gpuId", str(idx),
-                    "-i", IN_FILE,
-                    "-o", out_path,
-                ]
-                if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-                    base += shlex.split(APP_ARGS)
-                cmd = base + ["--keyspace", ks]
-                try:
-                    p = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1,
-                    )
-                    procs.append((idx, p))
-                except Exception as e:
-                    logger("Error", f"Failed to start GPU {idx}: {e}")
-            logger("Info", f"Running multi-GPU with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
-            ok = True
-            for idx, p in procs:
-                try:
-                    for raw in p.stdout:
-                        txt = (raw or "").strip()
-                        if txt:
-                            print(f"{Fore.CYAN}  > [GPU {idx}] {txt}{Style.RESET_ALL}", flush=True)
-                    rc = p.wait()
-                    if rc != 0:
-                        ok = False
-                except Exception as e:
-                    logger("Error", f"GPU {idx} execution error: {e}")
-                    ok = False
-            _combine_gpu_out_files(GPU_COUNT)
-            return ok
-    else:
-        base = [
-            BITCRACK_PATH,
-            "-i", IN_FILE,
-            "-o", OUT_FILE,
-            "-d", GPU_INDEX,
-        ]
-        if isinstance(BITCRACK_ARGS, str) and BITCRACK_ARGS.strip():
-            base += shlex.split(BITCRACK_ARGS)
-        command = base + ["--keyspace", keyspace]
     clean_out_file()
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
+    base = [APP_PATH]
+    if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+        base += shlex.split(APP_ARGS)
+    command = base + ["-i", IN_FILE, "-o", OUT_FILE, "--keyspace", keyspace]
     try:
         with subprocess.Popen(
             command,
@@ -1030,35 +795,19 @@ def process_out_file():
     found_pairs = []
     
     try:
-        # Read out.txt and extract keys
         with open(OUT_FILE, "r") as file:
-            current_address = None
-            extras_set = set([a for a in (ADDITIONAL_ADDRESSES or []) if isinstance(a, str)])
-            for line in file:
-                if "Pub Addr: " in line:
-                    current_address = line.split("Pub Addr: ")[1].strip()
-                elif "Priv (HEX): " in line and current_address:
-                    private_key = line.split("Priv (HEX): ")[1].strip()
-                    if current_address in extras_set:
-                        found_pairs.append((current_address, private_key))
-                    else:
-                        keys_to_post.append(private_key)
-                    current_address = None
-                else:
-                    raw = line.strip()
-                    if raw:
-                        parts = raw.split()
-                        if len(parts) >= 2:
-                            addr = parts[0].strip()
-                            priv = parts[1].strip()
-                            if re.fullmatch(r"(?:0x)?[0-9a-fA-F]{64}", priv):
-                                if addr in extras_set:
-                                    found_pairs.append((addr, priv))
-                                else:
-                                    keys_to_post.append(priv)
-                        elif re.fullmatch(r"(?:0x)?[0-9a-fA-F]{64}", raw):
-                            keys_to_post.append(raw)
-
+            content = file.read()
+        # Prefer explicit PROGRAM_KIND from settings; fall back to app basename
+        kind = (PROGRAM_KIND or "").strip().lower()
+        if not kind:
+            bname = os.path.basename((APP_PATH or "").lower())
+            if "bitcrack" in bname:
+                kind = "bitcrack"
+            elif "vanitysearch-v2" in bname or "vanitysearch2" in bname:
+                kind = "vanitysearch-v2"
+            else:
+                kind = "vanity"
+        keys_to_post, found_pairs = parse_out(content, kind, ADDITIONAL_ADDRESSES)
     except Exception as e:
         logger("Error", f"Error processing file '{OUT_FILE}': {e}")
         return False
@@ -1107,7 +856,7 @@ def _pad64_hex(n):
 
 def _generate_filler_keys(count, start_hex, end_hex, exclude=None):
     try:
-        exclude_set = set([e.lower().replace("0x", "") for e in (exclude or [])])
+        exclude_set = set([str(e).lower().replace("0x", "") for e in (exclude or [])])
         start = int(start_hex, 16)
         end = int(end_hex, 16)
         span = end - start
@@ -1122,8 +871,8 @@ def _generate_filler_keys(count, start_hex, end_hex, exclude=None):
             offset = rnd_int % span
             val = start + offset
             h = hex(val)[2:].zfill(64)
-            if h not in exclude_set and h not in out:
-                out.append("0x" + h)
+            if h not in exclude_set and h.lower() not in exclude_set and h.upper() not in out:
+                out.append(h.upper())
             attempts += 1
         return out
     except Exception:
@@ -1176,10 +925,7 @@ if __name__ == "__main__":
         # 2. New: New block notification logic
         if current_keyspace != previous_keyspace:
             previous_keyspace = current_keyspace
-            try:
-                gpu_label = GPU_INDEX if GPU_COUNT <= 1 else (GPU_IDS or ",".join(str(i) for i in range(GPU_COUNT)))
-            except Exception:
-                gpu_label = str(GPU_INDEX)
+            gpu_label = "-"
             update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label})
             logger("Info", f"New block notification sent: {current_keyspace}")
 

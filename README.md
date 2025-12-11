@@ -10,26 +10,21 @@ This script is designed to fetch work blocks, execute cracking software (`vanity
 
 The script is configured using the `settings.json` file.
 
-### Key Fields:
+### Key Fields (Simplified)
 
-| Field Name                                    | Description                                                                                                         | Example Value            |
-| :-------------------------------------------- | :------------------------------------------------------------------------------------------------------------------ | :----------------------- |
-| `api_url`                                     | The URL of the API used to fetch work blocks.                                                                       | `https://api.pool.com/`  |
-| `user_token`                                  | The pool token required for worker authentication.                                                                  | `a1b2c3d4e5f6`           |
-| `worker_name`                                 | A unique name for the worker, used in notifications.                                                                | `GPU-Rig-01`             |
-| `additional_address` / `additional_addresses` | The target address(es) to search for (high-value targets).                                                          | `1AbCd...`               |
-| `vanitysearch_path`                           | The file path to the `VanitySearch` binary.                                                                         | `./VanitySearch`         |
-| `vanitysearch_arguments`                      | Extra command-line arguments for `VanitySearch`.                                                                    | `--threads 4`            |
-| `bitcrack_path`                               | The file path to the `BitCrack` binary (e.g., `cuBitCrack`).                                                        | `./cuBitCrack`           |
-| `bitcrack_arguments`                          | Extra command-line arguments for `BitCrack`.                                                                        | `-t 256 -b 128 -p 64 -c` |
-| `gpu_count` / `gpu_index`                     | Total number of GPUs and the index of the GPU to be utilized.                                                       | `4` / `0`                |
-| `block_length`                                | The requested size of the work block (supports `K/M/B/T` suffixes).                                                 | `1T`                     |
-| `auto_switch`                                 | If `true`, automatically selects the best app: `BitCrack` for blocks $< 1T$ with one GPU, `VanitySearch` otherwise. | `true`                   |
-| `telegram_accesstoken`                        | The access token for your Telegram bot.                                                                             | `123456:ABC-DEF123456`   |
-| `telegram_chatid`                             | The chat ID for receiving Telegram notifications.                                                                   | `-1001234567890`         |
-| `oneshot`                                     | If `true`, the script performs one single cycle and then exits.                                                     | `false`                  |
-| `post_block_delay_enabled`                    | Enable/disable delay between blocks. If `false`, no wait between blocks.                                            | `true`                   |
-| `post_block_delay_minutes`                    | Delay between finishing a block and fetching the next, in minutes (used only if enabled). Default: `10s`.           | `1.5`                    |
+| Field Name            | Description                                                                                     | Example Value                                      |
+| :-------------------- | :---------------------------------------------------------------------------------------------- | :------------------------------------------------- |
+| `api_url`             | API base URL for fetching work blocks and posting results                                       | `https://unitedpuzzlepool.com/api/block`           |
+| `user_token`          | Pool token for worker authentication                                                            | `a1b2c3d4e5f6`                                     |
+| `worker_name`         | Human‑readable worker label used in Telegram                                                    | `GPU-Rig-01`                                       |
+| `additional_addresses`| Optional list of target addresses to stop on                                                    | `["1AbCd..."]`                                    |
+| `program_path`        | Path to the cracking program binary                                                              | `./VanitySearch-V2`                                |
+| `program_arguments`   | Extra CLI arguments passed through verbatim                                                      | `-g 1792,512`                                       |
+| `program_name`        | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v2` (lowercase)                 | `vanitysearch-v2`                                  |
+| `block_length`        | Requested block size (supports `K/M/B/T` suffixes)                                              | `1T`                                               |
+| `oneshot`             | Run a single cycle and exit                                                                     | `false`                                            |
+| `post_block_delay_enabled` | Enable delay between blocks                                                              | `true`                                             |
+| `post_block_delay_minutes` | Delay between iterations in minutes                                                       | `2`                                                |
 
 ---
 
@@ -92,7 +87,7 @@ The script continuously loops until one of the following conditions is met:
 
 ## 📢 Telegram Status (Single Message)
 
-The script maintains a single Telegram message and continuously edits it for clean, organized updates (no spam). It uses `parse_mode: HTML` with a worker header prepended.
+Telegram messaging is provided by a dedicated module `telegram_status.py`. The script maintains a single message per worker and continuously edits it (no spam). It uses `parse_mode: HTML` with a worker header prepended.
 
 ### Format
 
@@ -136,10 +131,10 @@ The script maintains a single Telegram message and continuously edits it for cle
 
 ### Notes
 
--   HTML line breaks use real newlines (`\n`), not `<br>`.
--   The script escapes dynamic values to prevent HTML parsing issues.
--   A small state file `telegram_state.json` stores the Telegram `message_id` per worker; this allows the script to resume editing the same message after restarts.
--   On HTML errors during creation, the script falls back to plain-text creation automatically and continues editing thereafter.
+-   Implemented via `telegram_status.py` with state persistence in `telegram_state.json`.
+-   Category‑based rate limiting avoids noisy updates (e.g., API errors vs. normal status lines).
+-   HTML line breaks use real newlines (`\n`) and dynamic values are escaped to prevent parsing issues.
+-   On HTML errors during creation, the module falls back to plain‑text creation and continues editing thereafter.
 
 ---
 
@@ -167,13 +162,22 @@ The script reloads `settings.json` before starting each new work cycle. You can 
 Notes:
 
 -   VanitySearch‑V2 supports `--keyspace` and multi‑address scanning. Use one GPU per instance; run separate instances for multi‑GPU.
--   Adjust `vanitysearch_arguments` or `bitcrack_arguments` in `settings.json` for performance tuning.
-
-## 💾 Files
+-   Configure runtime via `program_path`, `program_arguments`, and `program_name`.
 
 -   `in.txt`: Input addresses file used by the cracking application.
--   `out.txt`: Output file generated by `vanitysearch2`.
+-   `out.txt`: Output file generated by the selected cracking program.
 -   `KEYFOUND.txt`: Stores `addr:priv` pairs when an `additional_address` key is successfully found.
 -   `pending_keys.json`: Queue of private keys awaiting batch submission to the API. Flushed in dynamic batches (10–30), with range‑safe filler keys automatically added when the queue is short; cleared after **3 failed retries** on API "incompatible privatekeys" responses.
--   `telegram_state.json`: Persists the Telegram `message_id` per worker to enable single-message editing across restarts.
+-   `telegram_state.json`: Persists the Telegram `message_id` per worker to enable single‑message editing across restarts.
+-   `telegram_status.py`: External module that manages Telegram status creation/editing and notifications.
+
+### API Payload Format (privateKeys)
+
+-   Posted keys are an array of 64‑character hex strings (uppercase), without `0x`.
+-   Example: `{"privateKeys": ["0000...195B", "0000...846F", ...]}`
+
+### Output Parsing
+
+-   `output_parsers.py` routes based on `program_name` and supports VanitySearch‑V2 padded formats.
+-   For VanitySearch‑V2, lines like `Priv (HEX): 0x <padded hex>` are normalized to 64 hex characters.
     -   `bash safety_monitor.sh -g all`
