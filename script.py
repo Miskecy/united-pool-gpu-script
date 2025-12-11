@@ -220,6 +220,45 @@ STATUS = {
     "updated_at": "",
 }
 
+ERROR_COUNTS = {}
+
+def _record_error(category):
+    try:
+        c = int(ERROR_COUNTS.get(category, 0)) + 1
+        ERROR_COUNTS[category] = c
+        return c
+    except Exception:
+        return 1
+
+def notify_error(category, message, api_offline=False, sleep_seconds=0, rate_limit=300):
+    try:
+        update_status_rl({"last_error": str(message)}, category, rate_limit)
+    except Exception:
+        pass
+    try:
+        logger("Error", str(message))
+    except Exception:
+        pass
+    if api_offline:
+        try:
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+        except Exception:
+            pass
+        return
+    cnt = _record_error(category)
+    if cnt >= 3:
+        try:
+            send_telegram_notification(f"❌ Auto-exit after 3 errors in '{category}'.")
+        except Exception:
+            pass
+        try:
+            sys.exit(1)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
+
 def _load_pending_keys():
     global PENDING_KEYS
     try:
@@ -601,10 +640,9 @@ def fetch_block_data():
         logger("Info", f"Fetching data from {API_URL}")
         params = {"length": BLOCK_LENGTH} if BLOCK_LENGTH else None
         response = requests.get(API_URL, headers=headers, params=params, timeout=15)
-        
         if response.status_code == 200:
             return response.json()
-        elif response.status_code == 409:
+        if response.status_code == 409:
             try:
                 data = response.json()
             except Exception:
@@ -616,22 +654,16 @@ def fetch_block_data():
                 update_status({"all_blocks_solved": True, "next_fetch_in": 0})
                 logger("Success", "All blocks solved. Shutting down.")
                 return None
-            error_message = (
-                f"No range available: `{msg or 'No available random range'}`"
-            )
-            update_status_rl({"last_error": error_message}, "no_range", 300)
+            update_status_rl({"last_error": f"No range available: `{msg or 'No available random range'}`"}, "no_range", 300)
             logger("Error", f"Error fetching block: 409 - {response.text}")
             return None
-        else:
-            error_message = f"API error `{response.status_code}`"
-            update_status_rl({"last_error": error_message}, "api_fetch_error", 300)
-            logger("Error", f"Error fetching block: {response.status_code} - {response.text}")
+        if 500 <= response.status_code <= 599:
+            notify_error("api_offline", f"API offline `{response.status_code}`", api_offline=True, sleep_seconds=0, rate_limit=300)
             return None
-            
+        notify_error("api_fetch_error", f"API error `{response.status_code}`", api_offline=False, sleep_seconds=0, rate_limit=300)
+        return None
     except requests.RequestException as e:
-        error_message = f"API connection error `{type(e).__name__}`"
-        update_status_rl({"last_error": error_message}, "api_fetch_error", 300)
-        logger("Error", f"Request error {type(e).__name__}: {e}")
+        notify_error("api_offline", f"API connection error `{type(e).__name__}`", api_offline=True, sleep_seconds=0, rate_limit=300)
         return None
 
 # ----------------------------------------------------------------------------------------------
@@ -700,11 +732,13 @@ def post_private_keys(private_keys):
             logger("Error", f"Failed to send batch: Status {response.status_code}. Retrying in 30s.")
             if snippet:
                 logger("Info", f"Detail: {snippet}...")
-            update_status_rl({"last_batch": f"Failed status {response.status_code}"}, "post_error", 300)
+            update_status_rl({"last_batch": f"Failed status {response.status_code}", "last_error": f"Post error `{response.status_code}`"}, "post_error", 300)
+            notify_error("post_error", f"Post error `{response.status_code}`", api_offline=False, sleep_seconds=0, rate_limit=300)
             return (False, False)
     except requests.RequestException as e:
         logger("Error", f"Connection error while sending batch: {type(e).__name__}. Retrying in 30s.")
-        update_status_rl({"last_batch": f"Connection error {type(e).__name__}"}, "post_network_error", 300)
+        update_status_rl({"last_batch": f"Connection error {type(e).__name__}", "last_error": f"Post connection error `{type(e).__name__}`"}, "post_network_error", 300)
+        notify_error("api_offline", f"Post connection error `{type(e).__name__}`", api_offline=True, sleep_seconds=0, rate_limit=300)
         return (False, False)
 
 # ==============================================================================================
@@ -846,12 +880,18 @@ def run_external_program(start_hex, end_hex):
                 return True
             else:
                 logger("Error", f"External program failed with return code: {return_code}")
+                update_status_rl({"last_error": f"Program failed code `{return_code}`"}, "program_failed", 120)
+                notify_error("program_failed", f"Program failed code `{return_code}`", api_offline=False, sleep_seconds=0, rate_limit=120)
                 return False
     except FileNotFoundError:
         logger("Error", "External program not found. Check path and permissions.")
+        update_status_rl({"last_error": "Program not found"}, "program_not_found", 120)
+        notify_error("program_not_found", "Program not found", api_offline=False, sleep_seconds=0, rate_limit=120)
         return False
     except Exception as e:
         logger("Error", f"Exception while executing: {e}")
+        update_status_rl({"last_error": f"Program exception `{type(e).__name__}`"}, "program_exception", 120)
+        notify_error("program_exception", f"Program exception `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
         return False
 
 # ----------------------------------------------------------------------------------------------
@@ -864,6 +904,8 @@ def process_out_file():
     global PENDING_KEYS
     if not os.path.exists(OUT_FILE):
         logger("Warning", f"File '{OUT_FILE}' not found for processing.")
+        update_status_rl({"last_error": f"Output file missing"}, "output_missing", 120)
+        notify_error("output_missing", "Output file missing", api_offline=False, sleep_seconds=0, rate_limit=120)
         return False
 
     keys_to_post = []
@@ -885,6 +927,8 @@ def process_out_file():
         keys_to_post, found_pairs = parse_out(content, kind, ADDITIONAL_ADDRESSES)
     except Exception as e:
         logger("Error", f"Error processing file '{OUT_FILE}': {e}")
+        update_status_rl({"last_error": f"Output parse error `{type(e).__name__}`"}, "output_parse_error", 120)
+        notify_error("output_parse_error", f"Output parse error `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
         return False
 
     # 1. Check and Save Additional Address hit (and Notify)
@@ -917,6 +961,8 @@ def process_out_file():
         logger("Info", f"File '{OUT_FILE}' cleared for next cycle.")
     except Exception as e:
         logger("Error", f"Failed to clear file '{OUT_FILE}': {e}")
+        update_status_rl({"last_error": f"Clear out error `{type(e).__name__}`"}, "clear_out_error", 120)
+        notify_error("clear_out_error", f"Clear out error `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
 
     return False # Indicates the additional address key was NOT found
 
@@ -993,13 +1039,11 @@ if __name__ == "__main__":
         current_keyspace = f"{start_hex}:{end_hex}" # (NEW)
 
         if not addresses:
-            logger("Warning", "No addresses found in block. Retrying in 30 seconds.")
-            time.sleep(30)
+            notify_error("no_addresses", "No addresses in block", api_offline=False, sleep_seconds=30, rate_limit=120)
             continue
 
         if not (start_hex and end_hex):
-            logger("Error", "Key range (start/end) missing. Retrying in 30 seconds.")
-            time.sleep(30)
+            notify_error("missing_key_range", "Key range missing", api_offline=False, sleep_seconds=30, rate_limit=120)
             continue
         
         # 2. New: New block notification logic
