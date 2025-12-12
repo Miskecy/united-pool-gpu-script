@@ -143,6 +143,7 @@ LAST_POST_ATTEMPT = 0
 ALL_BLOCKS_SOLVED = False
 PROCESSED_ONE_BLOCK = False
 NEED_NEW_BLOCK_FETCH = False
+LAST_RUN_OK = False
 
 GPU_LABEL_CACHE = None
 
@@ -329,7 +330,7 @@ def _retry_pending_keys_now():
                 _save_pending_keys()
                 break
     # If we have some keys but fewer than required, try filling with randoms in current range
-    if not posted and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
+    if not posted and LAST_RUN_OK and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
         fillers = _generate_filler_keys(required - len(PENDING_KEYS), CURRENT_RANGE_START, CURRENT_RANGE_END, exclude=PENDING_KEYS)
         batch = PENDING_KEYS + fillers
         if len(batch) == required:
@@ -381,7 +382,7 @@ def flush_pending_keys_blocking():
                 _save_pending_keys()
                 time.sleep(30)
     # Try a final post with fillers if we have some keys but fewer than required
-    if not posted and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
+    if not posted and LAST_RUN_OK and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
         fillers = _generate_filler_keys(required - len(PENDING_KEYS), CURRENT_RANGE_START, CURRENT_RANGE_END, exclude=PENDING_KEYS)
         batch = PENDING_KEYS + fillers
         if len(batch) == required:
@@ -872,72 +873,35 @@ def run_external_program(start_hex, end_hex):
     clean_out_file()
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
     gpu_ids = _detect_gpu_list()
-    if len(gpu_ids) <= 1:
-        base = [APP_PATH]
-        if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-            base += shlex.split(APP_ARGS)
-        command = base + ["-i", IN_FILE, "-o", OUT_FILE, "--keyspace", keyspace]
-    else:
-        segments = _split_keyspace(start_hex, end_hex, len(gpu_ids))
-        procs = []
-        first_fail = None
-        for idx, gid in enumerate(gpu_ids):
-            outp = _gpu_out_path(idx)
-            base = [APP_PATH]
-            if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-                base += shlex.split(APP_ARGS)
-            args = list(base)
-            kind = (PROGRAM_KIND or "").strip().lower()
-            args += ["-i", IN_FILE, "-o", outp, "--keyspace", f"{segments[idx][0]}:{segments[idx][1]}"]
-            if ("-gpuId" in str(APP_ARGS or "")) or ("vanity" in kind):
-                args += ["-gpuId", str(gid)]
-            env = os.environ.copy()
-            try:
-                env["CUDA_VISIBLE_DEVICES"] = str(gid)
-            except Exception:
-                pass
-            try:
-                p = subprocess.Popen(
-                    args,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    env=env,
-                )
-                procs.append(p)
-            except FileNotFoundError:
-                logger("Error", "External program not found. Check path and permissions.")
-                update_status_rl({"last_error": "Program not found"}, "program_not_found", 120)
-                notify_error("program_not_found", "Program not found", api_offline=False, sleep_seconds=0, rate_limit=120)
-                return False
-            except Exception as e:
-                logger("Error", f"Exception while starting GPU {gid}: {e}")
-                update_status_rl({"last_error": f"Program start exception `{type(e).__name__}`"}, "program_exception", 120)
-                notify_error("program_exception", f"Program start exception `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
-                return False
-        ok_all = True
-        for p in procs:
-            rc = p.wait()
-            if rc != 0:
-                ok_all = False
-                if first_fail is None:
-                    first_fail = rc
-        _combine_gpu_out_files(len(gpu_ids))
-        if ok_all:
-            logger("Success", "External program finished successfully")
-            return True
-        logger("Error", f"External program failed with return code: {first_fail if first_fail is not None else -1}")
-        update_status_rl({"last_error": f"Program failed code `{first_fail if first_fail is not None else -1}`"}, "program_failed", 120)
-        notify_error("program_failed", f"Program failed code `{first_fail if first_fail is not None else -1}`", api_offline=False, sleep_seconds=0, rate_limit=120)
-        return False
+    selected_gpu = 0
     try:
+        if gpu_ids:
+            selected_gpu = int(gpu_ids[0])
+        m = re.search(r"-gpuId\s+(\d+)", str(APP_ARGS or ""))
+        if m:
+            selected_gpu = int(m.group(1))
+    except Exception:
+        selected_gpu = 0
+    base = [APP_PATH]
+    if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+        base += shlex.split(APP_ARGS)
+    kind = (PROGRAM_KIND or "").strip().lower()
+    if ("vanity" in kind) and not re.search(r"-gpuId\s+\d+", " ".join(base)):
+        base += ["-gpuId", "0"]
+    command = base + ["-i", IN_FILE, "-o", OUT_FILE, "--keyspace", keyspace]
+    try:
+        env = os.environ.copy()
+        try:
+            env["CUDA_VISIBLE_DEVICES"] = str(selected_gpu)
+        except Exception:
+            pass
         with subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=env,
         ) as process:
             last_dyn_len = 0
             progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
@@ -961,19 +925,35 @@ def run_external_program(start_hex, end_hex):
                 sys.stdout.flush()
             return_code = process.wait()
             if return_code == 0:
+                try:
+                    globals()["LAST_RUN_OK"] = True
+                except Exception:
+                    pass
                 logger("Success", "External program finished successfully")
                 return True
             else:
+                try:
+                    globals()["LAST_RUN_OK"] = False
+                except Exception:
+                    pass
                 logger("Error", f"External program failed with return code: {return_code}")
                 update_status_rl({"last_error": f"Program failed code `{return_code}`"}, "program_failed", 120)
                 notify_error("program_failed", f"Program failed code `{return_code}`", api_offline=False, sleep_seconds=0, rate_limit=120)
                 return False
     except FileNotFoundError:
+        try:
+            globals()["LAST_RUN_OK"] = False
+        except Exception:
+            pass
         logger("Error", "External program not found. Check path and permissions.")
         update_status_rl({"last_error": "Program not found"}, "program_not_found", 120)
         notify_error("program_not_found", "Program not found", api_offline=False, sleep_seconds=0, rate_limit=120)
         return False
     except Exception as e:
+        try:
+            globals()["LAST_RUN_OK"] = False
+        except Exception:
+            pass
         logger("Error", f"Exception while executing: {e}")
         update_status_rl({"last_error": f"Program exception `{type(e).__name__}`"}, "program_exception", 120)
         notify_error("program_exception", f"Program exception `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
