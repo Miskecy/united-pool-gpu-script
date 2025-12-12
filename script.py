@@ -362,7 +362,15 @@ def _scheduled_pending_post_retry():
 def flush_pending_keys_blocking():
     global PENDING_KEYS, NEED_NEW_BLOCK_FETCH
     posted = False
-    required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
+    def _current_checkwork_count():
+        try:
+            if os.path.exists(IN_FILE):
+                with open(IN_FILE, "r", encoding="utf-8") as f:
+                    return sum(1 for ln in f if ln.strip())
+        except Exception:
+            pass
+        return int(CURRENT_ADDR_COUNT or 10)
+    required = max(10, min(30, int(_current_checkwork_count())))
     while len(PENDING_KEYS) >= required:
         batch = PENDING_KEYS[:required]
         _res = post_private_keys(batch)
@@ -714,6 +722,10 @@ def post_private_keys(private_keys):
         if response.status_code == 200:
             logger("Success", "Private keys posted successfully.")
             update_status({"last_batch": f"Sent {len(private_keys)} keys"})
+            try:
+                _clean_gpu_out_files()
+            except Exception:
+                pass
             return (True, False)
         else:
             txt = ""
@@ -800,6 +812,7 @@ def clean_io_files():
             pass
         with open(OUT_FILE, "w"):
             pass
+        _clean_gpu_out_files()
     except Exception:
         pass
 
@@ -814,6 +827,26 @@ def clean_out_file():
 
 def _gpu_out_path(i):
     return f"out_gpu_{i}.txt"
+
+def _clean_gpu_out_files():
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        for name in os.listdir(here):
+            try:
+                if re.fullmatch(r"out_gpu_\d+\.txt", name):
+                    p = os.path.join(here, name)
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        try:
+                            with open(p, "w"):
+                                pass
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 def _split_keyspace(start_hex, end_hex, parts):
     try:
@@ -871,6 +904,7 @@ def run_external_program(start_hex, end_hex):
     """Run external program with given keyspace and stream live feedback."""
     keyspace = f"{start_hex}:{end_hex}"
     clean_out_file()
+    _clean_gpu_out_files()
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
     gpu_ids = _detect_gpu_list()
     kind = (PROGRAM_KIND or "").strip().lower()
@@ -924,6 +958,7 @@ def run_external_program(start_hex, end_hex):
             except Exception:
                 pass
             logger("Success", "External program finished successfully")
+            _clean_gpu_out_files()
             return True
         try:
             globals()["LAST_RUN_OK"] = False
@@ -998,6 +1033,7 @@ def run_external_program(start_hex, end_hex):
                 except Exception:
                     pass
                 logger("Success", "External program finished successfully")
+                _clean_gpu_out_files()
                 return True
             else:
                 try:
@@ -1092,6 +1128,7 @@ def process_out_file():
         with open(OUT_FILE, "w"):
             pass
         logger("Info", f"File '{OUT_FILE}' cleared for next cycle.")
+        _clean_gpu_out_files()
     except Exception as e:
         logger("Error", f"Failed to clear file '{OUT_FILE}': {e}")
         update_status_rl({"last_error": f"Clear out error `{type(e).__name__}`"}, "clear_out_error", 120)
