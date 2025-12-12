@@ -168,13 +168,6 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 -   VanitySearch/VanitySearch‑V2: the script adds `-gpuId <gid>` automatically per subprocess and filters any `-gpuId` you set in `program_arguments` to avoid conflicts.
 -   Other tools: if your binary requires a device selector flag (e.g., BitCrack), include it in `program_arguments`. The script passes it through per subprocess.
 
-### 🖥️ Console HUD
-
--   The console shows one live status line per GPU, updating in place to avoid spam.
--   Progress lines containing `MK/s` or `keys/s` are rendered as `[GPU <id>] <progress>` and refreshed on the same line.
--   Non‑progress lines (start banner, exits, hits) still print with `[GPU <id>]` prefix.
--   On non‑TTY environments, the script falls back to standard printing without in‑place updates.
-
 ### 🎯 Single‑GPU Mode
 
 -   To run one GPU per instance (e.g., for manual orchestration), start multiple processes with `CUDA_VISIBLE_DEVICES=<id>` and omit device selectors in `program_arguments`. The script maps the visible device to index `0` for VanitySearch‑style binaries.
@@ -217,7 +210,7 @@ Notes:
 ### 🧹 Cleanup & Reliability
 
 -   `out_gpu_<i>.txt` files are cleaned at start, before each run, after a successful run, after `out.txt` is cleared, and after a successful key post.
--   Batch size for submissions is derived from the API’s `checkwork_addresses` count (not `in.txt`).
+-   Batch size for submissions is derived from `in.txt` to match the block’s `checkwork_addresses` count.
 -   Filler keys are generated only when the previous run completed successfully; they are disabled after failures.
 -   When `send_additional_keys_to_api` is `true`, keys found for `additional_addresses` are also posted to the API in a dedicated call, in addition to being saved to `KEYFOUND.txt`.
 
