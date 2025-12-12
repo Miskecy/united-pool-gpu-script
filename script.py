@@ -397,15 +397,7 @@ def _scheduled_pending_post_retry():
 def flush_pending_keys_blocking():
     global PENDING_KEYS, NEED_NEW_BLOCK_FETCH
     posted = False
-    def _current_checkwork_count():
-        try:
-            if os.path.exists(IN_FILE):
-                with open(IN_FILE, "r", encoding="utf-8") as f:
-                    return sum(1 for ln in f if ln.strip())
-        except Exception:
-            pass
-        return int(CURRENT_ADDR_COUNT or 10)
-    required = max(10, min(30, int(_current_checkwork_count())))
+    required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
     while len(PENDING_KEYS) >= required:
         batch = PENDING_KEYS[:required]
         _res = post_private_keys(batch)
