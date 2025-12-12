@@ -187,6 +187,35 @@ def _detect_gpu_label():
     GPU_LABEL_CACHE = label
     return label
 
+def _detect_gpu_list():
+    try:
+        if APP_PATH:
+            cmd = [APP_PATH, "-l"]
+            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p:
+                try:
+                    out, _ = p.communicate(timeout=10)
+                except Exception:
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+                    out = ""
+            lines = [ln.strip() for ln in (out or "").splitlines()]
+            ids = []
+            for ln in lines:
+                m = re.match(r"^\s*GPU\s*#?(\d+)\b", ln, re.IGNORECASE)
+                if m:
+                    try:
+                        ids.append(int(m.group(1)))
+                    except Exception:
+                        pass
+            if ids:
+                ids = sorted(list(set(ids)))
+                return ids
+    except Exception:
+        pass
+    return [0]
+
 def _program_label():
     try:
         path = APP_PATH or ""
@@ -842,10 +871,66 @@ def run_external_program(start_hex, end_hex):
     keyspace = f"{start_hex}:{end_hex}"
     clean_out_file()
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
-    base = [APP_PATH]
-    if isinstance(APP_ARGS, str) and APP_ARGS.strip():
-        base += shlex.split(APP_ARGS)
-    command = base + ["-i", IN_FILE, "-o", OUT_FILE, "--keyspace", keyspace]
+    gpu_ids = _detect_gpu_list()
+    if len(gpu_ids) <= 1:
+        base = [APP_PATH]
+        if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+            base += shlex.split(APP_ARGS)
+        command = base + ["-i", IN_FILE, "-o", OUT_FILE, "--keyspace", keyspace]
+    else:
+        segments = _split_keyspace(start_hex, end_hex, len(gpu_ids))
+        procs = []
+        first_fail = None
+        for idx, gid in enumerate(gpu_ids):
+            outp = _gpu_out_path(idx)
+            base = [APP_PATH]
+            if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+                base += shlex.split(APP_ARGS)
+            args = list(base)
+            kind = (PROGRAM_KIND or "").strip().lower()
+            args += ["-i", IN_FILE, "-o", outp, "--keyspace", f"{segments[idx][0]}:{segments[idx][1]}"]
+            if ("-gpuId" in str(APP_ARGS or "")) or ("vanity" in kind):
+                args += ["-gpuId", str(gid)]
+            env = os.environ.copy()
+            try:
+                env["CUDA_VISIBLE_DEVICES"] = str(gid)
+            except Exception:
+                pass
+            try:
+                p = subprocess.Popen(
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                )
+                procs.append(p)
+            except FileNotFoundError:
+                logger("Error", "External program not found. Check path and permissions.")
+                update_status_rl({"last_error": "Program not found"}, "program_not_found", 120)
+                notify_error("program_not_found", "Program not found", api_offline=False, sleep_seconds=0, rate_limit=120)
+                return False
+            except Exception as e:
+                logger("Error", f"Exception while starting GPU {gid}: {e}")
+                update_status_rl({"last_error": f"Program start exception `{type(e).__name__}`"}, "program_exception", 120)
+                notify_error("program_exception", f"Program start exception `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
+                return False
+        ok_all = True
+        for p in procs:
+            rc = p.wait()
+            if rc != 0:
+                ok_all = False
+                if first_fail is None:
+                    first_fail = rc
+        _combine_gpu_out_files(len(gpu_ids))
+        if ok_all:
+            logger("Success", "External program finished successfully")
+            return True
+        logger("Error", f"External program failed with return code: {first_fail if first_fail is not None else -1}")
+        update_status_rl({"last_error": f"Program failed code `{first_fail if first_fail is not None else -1}`"}, "program_failed", 120)
+        notify_error("program_failed", f"Program failed code `{first_fail if first_fail is not None else -1}`", api_offline=False, sleep_seconds=0, rate_limit=120)
+        return False
     try:
         with subprocess.Popen(
             command,
