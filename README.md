@@ -63,7 +63,7 @@ You need a pool token to authenticate your worker when requesting blocks.
         - A special notification is sent to Telegram with the worker name.
         - Other normal keys are accumulated in `pending_keys.json`.
     - **Normal Key Found:** All non-target keys are accumulated in `pending_keys.json`.
-4. **Key Submission:** Batches of **10–30 keys** are sent to the `api_url/submit` endpoint, matching the current block's `checkwork_addresses` count and API limits. If the queue has fewer keys than required, the script auto‑generates valid filler keys uniformly within the current block range to reach the required batch size. Success and failure are logged and notified.
+4. **Key Submission:** Batches of **10–30 keys** are sent to the `api_url/submit` endpoint, matching the current block's `checkwork_addresses` count and API limits. The required batch size is derived from the current block’s addresses by counting lines in `in.txt`. If the queue has fewer keys than required, the script can auto‑generate valid filler keys uniformly within the current block range, but only when the previous run completed successfully.
     - **Incompatibility Handling:** If the API responds with an "incompatible privatekeys" error, the script immediately retries sending the same batch up to **3 times**. If all retries fail, it **clears `pending_keys`** and **fetches a new block** to avoid stalling.
 
 ### 🚀 One-Shot Mode (`oneshot: true`)
@@ -142,7 +142,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 
 ### GPU and Algorithm Detection
 
--   GPU name is detected by invoking your configured program with the `-l` flag and selecting the `GPU #<gpuId>` line, where `<gpuId>` is taken from `program_arguments` (e.g., `-gpuId 0`). The detected name is cached per run.
+-   GPU name is detected by invoking your configured program with the `-l` flag and selecting the `GPU #<gpuId>` lines.
 -   The Algorithm label is derived directly from the executable file name (`program_path` basename, without extension). Name it as you prefer (e.g., `VanitySearch`, `VanitySearch-V2`, `BitCrack`).
 -   For `api_url`, surrounding backticks and whitespace are trimmed automatically if present.
 
@@ -156,6 +156,20 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     python script.py
     ```
 3.  Monitor log output and Telegram for real-time notifications.
+
+### ⚡ Multi‑GPU Mode
+
+- When multiple GPUs are detected via your binary’s `-l` listing, the script automatically:
+  - Splits the fetched keyspace evenly into N segments (where N = GPU count).
+  - Launches N subprocesses, one per GPU, printing per‑GPU start lines and live output.
+  - Writes per‑GPU outputs to `out_gpu_<i>.txt` and merges them back into `out.txt` for parsing.
+  - Cleans `out_gpu_<i>.txt` at start, after each run, after key posting, and after `out.txt` is cleared.
+- VanitySearch/VanitySearch‑V2: the script adds `-gpuId <gid>` automatically per subprocess and filters any `-gpuId` you set in `program_arguments` to avoid conflicts.
+- Other tools: if your binary requires a device selector flag (e.g., BitCrack), include it in `program_arguments`. The script passes it through per subprocess.
+
+### 🎯 Single‑GPU Mode
+
+- To run one GPU per instance (e.g., for manual orchestration), start multiple processes with `CUDA_VISIBLE_DEVICES=<id>` and omit device selectors in `program_arguments`. The script maps the visible device to index `0` for VanitySearch‑style binaries.
 
 ### ⚙️ Dynamic Configuration
 
@@ -171,7 +185,7 @@ The script reloads `settings.json` before starting each new work cycle. You can 
 
 Notes:
 
--   VanitySearch‑V2 supports `--keyspace` and multi‑address scanning. Use one GPU per instance; run separate instances for multi‑GPU.
+-   VanitySearch‑V2 supports `--keyspace` and multi‑address scanning. The script now supports multi‑GPU in a single instance by splitting the range and launching one subprocess per GPU.
 -   Configure runtime via `program_path`, `program_arguments`, and `program_name`.
 
 -   `in.txt`: Input addresses file used by the cracking application.
@@ -191,6 +205,12 @@ Notes:
     -   `output_parsers.py` routes based on `program_name` and supports VanitySearch‑V2 padded formats.
     -   For VanitySearch‑V3, lines like `Priv (HEX): 0x <padded hex>` are normalized to 64 hex characters.
     -   `bash safety_monitor.sh -g all`
+
+### 🧹 Cleanup & Reliability
+
+-   `out_gpu_<i>.txt` files are cleaned at start, before each run, after a successful run, after `out.txt` is cleared, and after a successful key post.
+-   Batch size for submissions is derived from `in.txt` to match the block’s `checkwork_addresses` count.
+-   Filler keys are generated only when the previous run completed successfully; they are disabled after failures.
 
 ---
 
