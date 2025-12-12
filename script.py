@@ -1002,7 +1002,6 @@ def run_external_program(start_hex, end_hex):
                 t.join(timeout=1.0)
             except Exception:
                 pass
-        _clear_gpu_progress()
         _combine_gpu_out_files(len(gpu_ids))
         if ok_all:
             try:
