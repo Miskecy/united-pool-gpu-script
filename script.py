@@ -1239,6 +1239,7 @@ if __name__ == "__main__":
     STATUS["session_started_ts"] = time.time()
     STATUS["session_blocks"] = 0
     STATUS["session_consecutive"] = 0
+    STATUS["session_keyspace_total"] = 0
     while True:
         refresh_settings()
         flush_pending_keys_blocking()
@@ -1264,6 +1265,12 @@ if __name__ == "__main__":
         range_data = block_data.get("range", {})
         start_hex = range_data.get("start", "").replace("0x", "")
         end_hex = range_data.get("end", "").replace("0x", "")
+        block_size = 0
+        try:
+            if start_hex and end_hex:
+                block_size = int(end_hex, 16) - int(start_hex, 16)
+        except Exception:
+            block_size = 0
         current_keyspace = f"{start_hex}:{end_hex}" # (NEW)
 
         if not addresses:
@@ -1279,7 +1286,7 @@ if __name__ == "__main__":
             previous_keyspace = current_keyspace
             gpu_labels = _detect_gpu_labels()
             if gpu_labels:
-                gpu_label = "\n" + ",\n".join(gpu_labels)
+                gpu_label = "\n" + "\n".join(gpu_labels)
             else:
                 gpu_label = _detect_gpu_label()
             algo_label = _program_label()
@@ -1306,6 +1313,10 @@ if __name__ == "__main__":
         if ran_ok:
             STATUS["session_blocks"] = int(STATUS.get("session_blocks", 0)) + 1
             STATUS["session_consecutive"] = int(STATUS.get("session_consecutive", 0)) + 1
+            try:
+                STATUS["session_keyspace_total"] = int(STATUS.get("session_keyspace_total", 0)) + int(block_size)
+            except Exception:
+                pass
         else:
             STATUS["session_consecutive"] = 0
 

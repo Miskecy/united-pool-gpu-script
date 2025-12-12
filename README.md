@@ -98,7 +98,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     -   `⏳ Active: <code>duration</code>`
     -   `✅ Blocks: <code>count</code>`
     -   `🔁 Consecutive: <code>count</code>`
-    -   `⚙️ GPU: <code>gpu_name</code>`
+    -   `⚙️ GPU: <code>gpu_name</code>` (one GPU per line when multiple, no commas)
     -   `🧠 Algorithm: <code>executable_basename</code>`
     -   `🔧 Args: <code>executable_arguments</code>`
     -   `🧭 Range: <code>start:end</code>`
@@ -108,7 +108,8 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     -   `❗ Last Error: <i>message</i>`
     -   `🔑 Keyfound: <code>N saved to KEYFOUND.txt</code>`
     -   `⏱️ Next Fetch: <code>Xs</code>`
-    -   `🕒 Updated timestamp`
+    -   `🧱 Total Length: <code>accumulated keyspace</code>` (K/M/G/T/P units)
+    -   `🕒 Updated <i>time ago</i>`
     -   `🏁 All blocks solved ✅` when applicable
 
 ### Example
@@ -131,7 +132,8 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 ❗ Last Error: -
 🔑 Keyfound: -
 ⏱️ Next Fetch: 0s
-🕒 Updated 2025-12-08 12:20:44
+🧱 Total Length: 1.23G
+🕒 Updated 3 mins ago
 ```
 
 ### Notes
@@ -140,6 +142,9 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 -   Category‑based rate limiting avoids noisy updates (e.g., API errors vs. normal status lines).
 -   HTML line breaks use real newlines (`\n`) and dynamic values are escaped to prevent parsing issues.
 -   On HTML errors during creation, the module falls back to plain‑text creation and continues editing thereafter.
+-   GPU entries in the `⚙️ GPU` line render one per line (no commas) for multi‑GPU setups.
+-   `🧱 Total Length` accumulates the keyspace length per successfully processed block and shows a compact unit (K/M/G/T/P).
+-   `🕒 Updated` now shows a human‑friendly time‑ago based on the last status update.
 
 ### GPU and Algorithm Detection
 

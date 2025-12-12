@@ -156,6 +156,19 @@ def _format_duration(seconds):
         parts.append(f"{s} sec" + ("s" if s != 1 else ""))
     return " ".join(parts)
 
+def _format_big_number(n):
+    try:
+        n = int(n or 0)
+    except Exception:
+        n = 0
+    units = [("P", 10**15), ("T", 10**12), ("G", 10**9), ("M", 10**6), ("K", 10**3)]
+    for suf, val in units:
+        if n >= val:
+            v = n / val
+            s = f"{v:.2f}".rstrip("0").rstrip(".")
+            return f"{s}{suf}"
+    return str(n)
+
 def format_status_html(status):
     sid = _escape_html(status.get("session_id", ""))
     started = status.get("session_started_ts", 0)
@@ -164,6 +177,7 @@ def format_status_html(status):
     active = _escape_html(_format_duration(dur))
     blocks = status.get("session_blocks", 0)
     consec = status.get("session_consecutive", 0)
+    total_len = _format_big_number(status.get("session_keyspace_total", 0))
     gpu = _escape_html(status.get("gpu", ""))
     alg = _escape_html(status.get("algorithm", ""))
     args = _escape_html(status.get("arguments", ""))
@@ -174,13 +188,21 @@ def format_status_html(status):
     last_error = _escape_html(status.get("last_error", "-"))
     keyfound = _escape_html(status.get("keyfound", "-"))
     next_in = status.get("next_fetch_in", 0)
-    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    updated_iso = status.get("updated_at", "")
+    updated_ago = "-"
+    try:
+        dt = datetime.fromisoformat(updated_iso)
+        sec = int(max(0, time.time() - dt.timestamp()))
+        updated_ago = _format_duration(sec)
+    except Exception:
+        updated_ago = "now"
     lines = [
         "📊 <b>Status</b>",
         f"🧩 <b>Session</b>: <code>{sid}</code>",
         f"⏳ <b>Active</b>: <code>{active}</code>",
         f"✅ <b>Blocks</b>: <code>{blocks}</code>",
         f"🔁 <b>Consecutive</b>: <code>{consec}</code>",
+        f"🧱 <b>Total Length</b>: <code>{total_len}</code>",
         f"⚙️ <b>GPU</b>: <code>{gpu}</code>",
         f"🧠 <b>Algorithm</b>: <code>{alg}</code>",
         f"🔧 <b>Args</b>: <code>{args}</code>",
@@ -191,7 +213,7 @@ def format_status_html(status):
         f"❗ <b>Last Error</b>: <i>{last_error}</i>",
         f"🔑 <b>Keyfound</b>: <code>{keyfound}</code>",
         f"⏱️ <b>Next Fetch</b>: <code>{next_in}s</code>",
-        f"🕒 <i>Updated {ts}</i>",
+        f"🕒 <i>Updated {updated_ago} ago</i>",
     ]
     if status.get("all_blocks_solved", False):
         lines.append("🏁 <b>All blocks solved</b> ✅")
