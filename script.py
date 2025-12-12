@@ -188,6 +188,36 @@ def _detect_gpu_label():
     GPU_LABEL_CACHE = label
     return label
 
+def _detect_gpu_labels():
+    try:
+        labels = []
+        if APP_PATH:
+            cmd = [APP_PATH, "-l"]
+            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p:
+                try:
+                    out, _ = p.communicate(timeout=10)
+                except Exception:
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+                    out = ""
+            lines = [ln.strip() for ln in (out or "").splitlines()]
+            for ln in lines:
+                m = re.match(r"^\s*GPU\s*#?(\d+)\b(.+)$", ln, re.IGNORECASE)
+                if m:
+                    gid = m.group(1)
+                    name = m.group(2).strip()
+                    idx = name.find("(")
+                    if idx > 0:
+                        name = name[:idx].strip()
+                    labels.append(f"GPU#{gid} {name}")
+        if labels:
+            return labels
+    except Exception:
+        pass
+    return []
+
 def _detect_gpu_list():
     try:
         if APP_PATH:
@@ -659,7 +689,12 @@ def update_status(fields=None):
     _tg_update_status(STATUS, fields or {}, gpu_fallback="-")
 
 def update_status_rl(fields, category, min_interval):
-    _tg_update_status_rl(STATUS, fields, category, min_interval, gpu_fallback="-")
+    try:
+        for k, v in (fields or {}).items():
+            STATUS[k] = v
+    except Exception:
+        pass
+    _tg_update_status_rl(STATUS, fields or {}, category, min_interval, gpu_fallback="-")
 
 # ----------------------------------------------------------------------------------------------
 
@@ -1219,7 +1254,8 @@ if __name__ == "__main__":
         # 2. New: New block notification logic
         if current_keyspace != previous_keyspace:
             previous_keyspace = current_keyspace
-            gpu_label = _detect_gpu_label()
+            gpu_labels = _detect_gpu_labels()
+            gpu_label = ", ".join(gpu_labels) if gpu_labels else _detect_gpu_label()
             algo_label = _program_label()
             update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label, "arguments": _status_program_args()})
             logger("Info", f"New block notification sent: {current_keyspace}")
