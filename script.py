@@ -15,6 +15,7 @@ import shlex
 import re
 import uuid
 import hashlib
+import threading
 from output_parsers import parse_out
 from telegram_status import (
     configure_telegram,
@@ -912,6 +913,15 @@ def _combine_gpu_out_files(count):
     except Exception:
         pass
 
+def _stream_gpu_output(proc, gid):
+    try:
+        for raw in proc.stdout:
+            txt = (raw or "").rstrip("\n").strip()
+            if txt:
+                print(f"{Fore.CYAN}[GPU {gid}] {txt}{Style.RESET_ALL}", flush=True)
+    except Exception:
+        pass
+
 def _parse_length_to_count(s):
     try:
         if not s:
@@ -943,6 +953,7 @@ def run_external_program(start_hex, end_hex):
     if len(gpu_ids) > 1:
         segments = _split_keyspace(start_hex, end_hex, len(gpu_ids))
         procs = []
+        threads = []
         first_fail = None
         for idx, gid in enumerate(gpu_ids):
             outp = _gpu_out_path(idx)
@@ -963,9 +974,12 @@ def run_external_program(start_hex, end_hex):
             if "vanity" in kind:
                 args += ["-gpuId", str(gid)]
             try:
-                p = subprocess.Popen(args)
+                p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 procs.append(p)
-                print(f"{Fore.CYAN}  > GPU {gid} started segment {segments[idx][0]}:{segments[idx][1]}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}[GPU {gid}] started {segments[idx][0]}:{segments[idx][1]}{Style.RESET_ALL}")
+                t = threading.Thread(target=_stream_gpu_output, args=(p, gid), daemon=True)
+                t.start()
+                threads.append(t)
             except FileNotFoundError:
                 logger("Error", "External program not found. Check path and permissions.")
                 update_status_rl({"last_error": "Program not found"}, "program_not_found", 120)
@@ -983,6 +997,11 @@ def run_external_program(start_hex, end_hex):
                 ok_all = False
                 if first_fail is None:
                     first_fail = rc
+        for t in threads:
+            try:
+                t.join(timeout=1.0)
+            except Exception:
+                pass
         _combine_gpu_out_files(len(gpu_ids))
         if ok_all:
             try:
