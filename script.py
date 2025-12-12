@@ -875,10 +875,15 @@ def run_external_program(start_hex, end_hex):
     gpu_ids = _detect_gpu_list()
     selected_gpu = 0
     try:
-        if gpu_ids:
+        env_hint = os.environ.get("CUDA_VISIBLE_DEVICES")
+        if env_hint:
+            parts = [p.strip() for p in env_hint.split(",") if p.strip()]
+            if parts and parts[0].isdigit():
+                selected_gpu = int(parts[0])
+        elif gpu_ids:
             selected_gpu = int(gpu_ids[0])
         m = re.search(r"-gpuId\s+(\d+)", str(APP_ARGS or ""))
-        if m:
+        if m and not env_hint:
             selected_gpu = int(m.group(1))
     except Exception:
         selected_gpu = 0
@@ -892,7 +897,11 @@ def run_external_program(start_hex, end_hex):
     try:
         env = os.environ.copy()
         try:
-            env["CUDA_VISIBLE_DEVICES"] = str(selected_gpu)
+            existing = env.get("CUDA_VISIBLE_DEVICES")
+            if existing:
+                env["CUDA_VISIBLE_DEVICES"] = existing
+            else:
+                env["CUDA_VISIBLE_DEVICES"] = str(selected_gpu)
         except Exception:
             pass
         with subprocess.Popen(
