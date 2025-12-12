@@ -1,5 +1,9 @@
 # United GPU Script
 
+<p align="center">
+  <img  src="/index.jpg">
+</p>
+
 ## Overview
 
 This script is designed to fetch work blocks, execute cracking software (`vanitysearch2` or `BitCrack`), and manage the generated private keys. Key management includes sending notifications via Telegram and submitting found keys in batches to the API.
@@ -18,9 +22,9 @@ The script is configured using the `settings.json` file.
 | `user_token`                  | Pool token for worker authentication                                            | `a1b2c3d4e5f6`                           |
 | `worker_name`                 | Human‑readable worker label used in Telegram                                    | `GPU-Rig-01`                             |
 | `additional_addresses`        | Optional list of target addresses to stop on                                    | `["1AbCd..."]`                           |
-| `program_path`                | Path to the cracking program binary                                             | `./VanitySearch-V2`                      |
+| `program_path`                | Path to the cracking program binary                                             | `./VanitySearch-V3`                      |
 | `program_arguments`           | Extra CLI arguments passed through verbatim                                     | `-g 1792,512`                            |
-| `program_name`                | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v2` (lowercase) | `vanitysearch-v2`                        |
+| `program_name`                | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v3` (lowercase) | `vanitysearch-v3`                        |
 | `block_length`                | Requested block size (supports `K/M/B/T` suffixes)                              | `1T`                                     |
 | `oneshot`                     | Run a single cycle and exit                                                     | `false`                                  |
 | `post_block_delay_enabled`    | Enable delay between blocks                                                     | `true`                                   |
@@ -152,7 +156,7 @@ GPU#3 NVIDIA GeForce RTX 4090
 ### GPU and Algorithm Detection
 
 -   GPU name is detected by invoking your configured program with the `-l` flag and selecting the `GPU #<gpuId>` lines.
--   The Algorithm label is derived directly from the executable file name (`program_path` basename, without extension). Name it as you prefer (e.g., `VanitySearch`, `VanitySearch-V2`, `BitCrack`).
+-   The Algorithm label is derived directly from the executable file name (`program_path` basename, without extension). Name it as you prefer (e.g., `VanitySearch`, `vanitysearch-v3`, `BitCrack`).
 -   For `api_url`, surrounding backticks and whitespace are trimmed automatically if present.
 
 ---
@@ -189,7 +193,7 @@ The script reloads `settings.json` before starting each new work cycle. You can 
 ## Tool References
 
 -   VanitySearch (official): https://github.com/JeanLucPons/VanitySearch
--   VanitySearch‑V2 (keyspace support): https://github.com/ilkerccom/VanitySearch-V2
+-   VanitySearch‑V3 (keyspace support): https://github.com/Miskecy/VanitySearch-V3
 -   BitCrack (official): https://github.com/brichard19/BitCrack
 
 Notes:
