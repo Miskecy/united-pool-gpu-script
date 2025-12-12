@@ -188,14 +188,7 @@ def format_status_html(status):
     last_error = _escape_html(status.get("last_error", "-"))
     keyfound = _escape_html(status.get("keyfound", "-"))
     next_in = status.get("next_fetch_in", 0)
-    updated_iso = status.get("updated_at", "")
-    updated_ago = "-"
-    try:
-        dt = datetime.fromisoformat(updated_iso)
-        sec = int(max(0, time.time() - dt.timestamp()))
-        updated_ago = _format_duration(sec)
-    except Exception:
-        updated_ago = "now"
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     lines = [
         "📊 <b>Status</b>",
         f"🧩 <b>Session</b>: <code>{sid}</code>",
@@ -213,7 +206,7 @@ def format_status_html(status):
         f"❗ <b>Last Error</b>: <i>{last_error}</i>",
         f"🔑 <b>Keyfound</b>: <code>{keyfound}</code>",
         f"⏱️ <b>Next Fetch</b>: <code>{next_in}s</code>",
-        f"🕒 <i>Updated {updated_ago} ago</i>",
+        f"🕒 <i>Updated {ts}</i>",
     ]
     if status.get("all_blocks_solved", False):
         lines.append("🏁 <b>All blocks solved</b> ✅")
