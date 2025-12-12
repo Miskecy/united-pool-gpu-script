@@ -47,6 +47,7 @@ APP_PATH = ""
 APP_ARGS = ""
 PROGRAM_KIND = "vanity"
 WORKER_NAME = ""
+SEND_ADDITIONAL_KEYS_TO_API = False
 
 ONE_SHOT = False
 POST_BLOCK_DELAY_SECONDS = 10
@@ -97,6 +98,10 @@ def _apply_settings(s):
     except Exception:
         pass
     ONE_SHOT = bool(s.get("oneshot", False))
+    try:
+        SEND_ADDITIONAL_KEYS_TO_API = bool(s.get("send_additional_keys_to_api", False))
+    except Exception:
+        SEND_ADDITIONAL_KEYS_TO_API = False
     try:
         POST_BLOCK_DELAY_ENABLED = bool(s.get("post_block_delay_enabled", True))
     except Exception:
@@ -1146,6 +1151,13 @@ def process_out_file():
             logger("KEYFOUND", f"Private key saved in '{KEYFOUND_FILE}'.")
         except Exception as e:
             logger("KEYFOUND Error", f"Failed to save private key to file: {e}")
+        if SEND_ADDITIONAL_KEYS_TO_API:
+            try:
+                add_privs = [str(k).replace("0x", "").upper() for (_addr, k) in found_pairs if isinstance(k, str) and k.strip()]
+                if add_privs:
+                    post_private_keys(add_privs)
+            except Exception:
+                pass
         if keys_to_post:
             PENDING_KEYS.extend(keys_to_post)
             _save_pending_keys()

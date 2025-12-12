@@ -10,6 +10,7 @@
     "oneshot": false,
     "post_block_delay_enabled": false,
     "post_block_delay_minutes": 1,
+    "send_additional_keys_to_api": false,
     "telegram_share": false,
     "telegram_accesstoken": "YOUR_TELEGRAM_BOT_TOKEN",
     "telegram_chatid": "YOUR_CHAT_ID"

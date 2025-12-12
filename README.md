@@ -12,19 +12,20 @@ The script is configured using the `settings.json` file.
 
 ### Key Fields (Simplified)
 
-| Field Name                 | Description                                                                     | Example Value                            |
-| :------------------------- | :------------------------------------------------------------------------------ | :--------------------------------------- |
-| `api_url`                  | API base URL for fetching work blocks and posting results                       | `https://unitedpuzzlepool.com/api/block` |
-| `user_token`               | Pool token for worker authentication                                            | `a1b2c3d4e5f6`                           |
-| `worker_name`              | Human‑readable worker label used in Telegram                                    | `GPU-Rig-01`                             |
-| `additional_addresses`     | Optional list of target addresses to stop on                                    | `["1AbCd..."]`                           |
-| `program_path`             | Path to the cracking program binary                                             | `./VanitySearch-V2`                      |
-| `program_arguments`        | Extra CLI arguments passed through verbatim                                     | `-g 1792,512`                            |
-| `program_name`             | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v2` (lowercase) | `vanitysearch-v2`                        |
-| `block_length`             | Requested block size (supports `K/M/B/T` suffixes)                              | `1T`                                     |
-| `oneshot`                  | Run a single cycle and exit                                                     | `false`                                  |
-| `post_block_delay_enabled` | Enable delay between blocks                                                     | `true`                                   |
-| `post_block_delay_minutes` | Delay between iterations in minutes                                             | `2`                                      |
+| Field Name                    | Description                                                                     | Example Value                            |
+| :---------------------------- | :------------------------------------------------------------------------------ | :--------------------------------------- |
+| `api_url`                     | API base URL for fetching work blocks and posting results                       | `https://unitedpuzzlepool.com/api/block` |
+| `user_token`                  | Pool token for worker authentication                                            | `a1b2c3d4e5f6`                           |
+| `worker_name`                 | Human‑readable worker label used in Telegram                                    | `GPU-Rig-01`                             |
+| `additional_addresses`        | Optional list of target addresses to stop on                                    | `["1AbCd..."]`                           |
+| `program_path`                | Path to the cracking program binary                                             | `./VanitySearch-V2`                      |
+| `program_arguments`           | Extra CLI arguments passed through verbatim                                     | `-g 1792,512`                            |
+| `program_name`                | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v2` (lowercase) | `vanitysearch-v2`                        |
+| `block_length`                | Requested block size (supports `K/M/B/T` suffixes)                              | `1T`                                     |
+| `oneshot`                     | Run a single cycle and exit                                                     | `false`                                  |
+| `post_block_delay_enabled`    | Enable delay between blocks                                                     | `true`                                   |
+| `post_block_delay_minutes`    | Delay between iterations in minutes                                             | `2`                                      |
+| `send_additional_keys_to_api` | Post keys found for `additional_addresses` to the API (default false)           | `false`                                  |
 
 ---
 
@@ -159,17 +160,17 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 
 ### ⚡ Multi‑GPU Mode
 
-- When multiple GPUs are detected via your binary’s `-l` listing, the script automatically:
-  - Splits the fetched keyspace evenly into N segments (where N = GPU count).
-  - Launches N subprocesses, one per GPU, printing per‑GPU start lines and live output.
-  - Writes per‑GPU outputs to `out_gpu_<i>.txt` and merges them back into `out.txt` for parsing.
-  - Cleans `out_gpu_<i>.txt` at start, after each run, after key posting, and after `out.txt` is cleared.
-- VanitySearch/VanitySearch‑V2: the script adds `-gpuId <gid>` automatically per subprocess and filters any `-gpuId` you set in `program_arguments` to avoid conflicts.
-- Other tools: if your binary requires a device selector flag (e.g., BitCrack), include it in `program_arguments`. The script passes it through per subprocess.
+-   When multiple GPUs are detected via your binary’s `-l` listing, the script automatically:
+    -   Splits the fetched keyspace evenly into N segments (where N = GPU count).
+    -   Launches N subprocesses, one per GPU, printing per‑GPU start lines and live output.
+    -   Writes per‑GPU outputs to `out_gpu_<i>.txt` and merges them back into `out.txt` for parsing.
+    -   Cleans `out_gpu_<i>.txt` at start, after each run, after key posting, and after `out.txt` is cleared.
+-   VanitySearch/VanitySearch‑V2: the script adds `-gpuId <gid>` automatically per subprocess and filters any `-gpuId` you set in `program_arguments` to avoid conflicts.
+-   Other tools: if your binary requires a device selector flag (e.g., BitCrack), include it in `program_arguments`. The script passes it through per subprocess.
 
 ### 🎯 Single‑GPU Mode
 
-- To run one GPU per instance (e.g., for manual orchestration), start multiple processes with `CUDA_VISIBLE_DEVICES=<id>` and omit device selectors in `program_arguments`. The script maps the visible device to index `0` for VanitySearch‑style binaries.
+-   To run one GPU per instance (e.g., for manual orchestration), start multiple processes with `CUDA_VISIBLE_DEVICES=<id>` and omit device selectors in `program_arguments`. The script maps the visible device to index `0` for VanitySearch‑style binaries.
 
 ### ⚙️ Dynamic Configuration
 
@@ -211,6 +212,7 @@ Notes:
 -   `out_gpu_<i>.txt` files are cleaned at start, before each run, after a successful run, after `out.txt` is cleared, and after a successful key post.
 -   Batch size for submissions is derived from `in.txt` to match the block’s `checkwork_addresses` count.
 -   Filler keys are generated only when the previous run completed successfully; they are disabled after failures.
+-   When `send_additional_keys_to_api` is `true`, keys found for `additional_addresses` are also posted to the API in a dedicated call, in addition to being saved to `KEYFOUND.txt`.
 
 ---
 
@@ -220,68 +222,69 @@ The repository includes an optional Telegram‑based controller (`bot_controller
 
 ### Setup
 
-- Configure `settings.json`:
-  - `telegram_accesstoken`: your Telegram bot token
-  - `telegram_chatid`: your chat ID
-  - `worker_name`: human‑readable server name (used for targeting)
-- Start the controller:
-  ```bash
-  python bot_controller.py
-  ```
+-   Configure `settings.json`:
+    -   `telegram_accesstoken`: your Telegram bot token
+    -   `telegram_chatid`: your chat ID
+    -   `worker_name`: human‑readable server name (used for targeting)
+-   Start the controller:
+    ```bash
+    python bot_controller.py
+    ```
 
 ### Server Targeting
 
-- Each machine derives its server name from `worker_name` (or `SERVER_NAME` env, or system `COMPUTERNAME/HOSTNAME`).
-- Set a target with `/server <name>` to apply commands only to matching servers.
-- Clear the target with `/cleartarget` to broadcast commands again.
-- Commands also accept an inline target: `/stopscript <name>`.
+-   Each machine derives its server name from `worker_name` (or `SERVER_NAME` env, or system `COMPUTERNAME/HOSTNAME`).
+-   Set a target with `/server <name>` to apply commands only to matching servers.
+-   Clear the target with `/cleartarget` to broadcast commands again.
+-   Commands also accept an inline target: `/stopscript <name>`.
 
 ### Server Discovery
 
-- Use `/serverlist` to discover available servers. The controller broadcasts presence and aggregates responses for a short window, then returns a formatted list.
+-   Use `/serverlist` to discover available servers. The controller broadcasts presence and aggregates responses for a short window, then returns a formatted list.
 
 ### Safety Behavior
 
-- If `bot_controller.py` exits unexpectedly or is stopped, it attempts to terminate any worker process it started. This prevents orphaned workers.
+-   If `bot_controller.py` exits unexpectedly or is stopped, it attempts to terminate any worker process it started. This prevents orphaned workers.
 
 ### Commands
 
-- `/server <name>`: set target server name for subsequent commands.
-- `/cleartarget`: clear current target; broadcast commands to all.
-- `/startscript [name]`: start `script.py` on targeted servers.
-- `/stopscript [name]`: stop `script.py` on targeted servers.
-- `/restartscript [name]`: restart `script.py` on targeted servers.
-- `/status [name]`: show local status, server name, and current target.
-- `/whoami`: show local server name.
-- `/serverlist`: list discovered servers.
-- `/reloadsettings`: reload `settings.json` into the controller.
-- `/get <key>`: show the current value for `<key>`.
-- `/set <key> <value>`: update the value for `<key>`.
+-   `/server <name>`: set target server name for subsequent commands.
+-   `/cleartarget`: clear current target; broadcast commands to all.
+-   `/startscript [name]`: start `script.py` on targeted servers.
+-   `/stopscript [name]`: stop `script.py` on targeted servers.
+-   `/restartscript [name]`: restart `script.py` on targeted servers.
+-   `/status [name]`: show local status, server name, and current target.
+-   `/whoami`: show local server name.
+-   `/serverlist`: list discovered servers.
+-   `/reloadsettings`: reload `settings.json` into the controller.
+-   `/get <key>`: show the current value for `<key>`.
+-   `/set <key> <value>`: update the value for `<key>`.
 
 ### `/get` and `/set` Details
 
-- Available keys are derived from `settings.json` and typically include:
-  - `api_url`: API base URL
-  - `user_token`: pool token
-  - `worker_name`: server name
-  - `program_name`: program identifier
-  - `program_path`: executable path
-  - `program_arguments`: CLI arguments
-  - `block_length`: keyspace block size
-  - `oneshot`: single‑block mode (bool)
-  - `post_block_delay_enabled`: delay toggle (bool)
-  - `post_block_delay_minutes`: delay minutes
-  - `additional_addresses`: list of extra addresses
-  - `telegram_share`: share toggle (bool)
-  - `telegram_accesstoken`: bot token
-  - `telegram_chatid`: chat ID
+-   Available keys are derived from `settings.json` and typically include:
 
-- Value parsing:
-  - `true`/`false` → booleans
-  - numeric strings → integers/floats
-  - JSON objects/arrays → parsed structures
-  - other → raw string
+    -   `api_url`: API base URL
+    -   `user_token`: pool token
+    -   `worker_name`: server name
+    -   `program_name`: program identifier
+    -   `program_path`: executable path
+    -   `program_arguments`: CLI arguments
+    -   `block_length`: keyspace block size
+    -   `oneshot`: single‑block mode (bool)
+    -   `post_block_delay_enabled`: delay toggle (bool)
+    -   `post_block_delay_minutes`: delay minutes
+    -   `additional_addresses`: list of extra addresses
+    -   `telegram_share`: share toggle (bool)
+    -   `telegram_accesstoken`: bot token
+    -   `telegram_chatid`: chat ID
+
+-   Value parsing:
+    -   `true`/`false` → booleans
+    -   numeric strings → integers/floats
+    -   JSON objects/arrays → parsed structures
+    -   other → raw string
 
 ### Help Output
 
-- The controller’s `/help` uses rich formatting (HTML) and includes targeting, worker control, settings management, and the dynamic list of available keys.
+-   The controller’s `/help` uses rich formatting (HTML) and includes targeting, worker control, settings management, and the dynamic list of available keys.
