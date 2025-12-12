@@ -873,6 +873,66 @@ def run_external_program(start_hex, end_hex):
     clean_out_file()
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
     gpu_ids = _detect_gpu_list()
+    kind = (PROGRAM_KIND or "").strip().lower()
+    if len(gpu_ids) > 1:
+        segments = _split_keyspace(start_hex, end_hex, len(gpu_ids))
+        procs = []
+        first_fail = None
+        for idx, gid in enumerate(gpu_ids):
+            outp = _gpu_out_path(idx)
+            base = [APP_PATH]
+            if isinstance(APP_ARGS, str) and APP_ARGS.strip():
+                parsed = shlex.split(APP_ARGS)
+                filtered = []
+                i = 0
+                while i < len(parsed):
+                    if parsed[i] == "-gpuId" and i + 1 < len(parsed):
+                        i += 2
+                        continue
+                    filtered.append(parsed[i])
+                    i += 1
+                base += filtered
+            args = list(base)
+            args += ["-i", IN_FILE, "-o", outp, "--keyspace", f"{segments[idx][0]}:{segments[idx][1]}"]
+            if "vanity" in kind:
+                args += ["-gpuId", str(gid)]
+            try:
+                p = subprocess.Popen(args)
+                procs.append(p)
+                print(f"{Fore.CYAN}  > GPU {gid} started segment {segments[idx][0]}:{segments[idx][1]}{Style.RESET_ALL}")
+            except FileNotFoundError:
+                logger("Error", "External program not found. Check path and permissions.")
+                update_status_rl({"last_error": "Program not found"}, "program_not_found", 120)
+                notify_error("program_not_found", "Program not found", api_offline=False, sleep_seconds=0, rate_limit=120)
+                return False
+            except Exception as e:
+                logger("Error", f"Exception while starting GPU {gid}: {e}")
+                update_status_rl({"last_error": f"Program start exception `{type(e).__name__}`"}, "program_exception", 120)
+                notify_error("program_exception", f"Program start exception `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
+                return False
+        ok_all = True
+        for p in procs:
+            rc = p.wait()
+            if rc != 0:
+                ok_all = False
+                if first_fail is None:
+                    first_fail = rc
+        _combine_gpu_out_files(len(gpu_ids))
+        if ok_all:
+            try:
+                globals()["LAST_RUN_OK"] = True
+            except Exception:
+                pass
+            logger("Success", "External program finished successfully")
+            return True
+        try:
+            globals()["LAST_RUN_OK"] = False
+        except Exception:
+            pass
+        logger("Error", f"External program failed with return code: {first_fail if first_fail is not None else -1}")
+        update_status_rl({"last_error": f"Program failed code `{first_fail if first_fail is not None else -1}`"}, "program_failed", 120)
+        notify_error("program_failed", f"Program failed code `{first_fail if first_fail is not None else -1}`", api_offline=False, sleep_seconds=0, rate_limit=120)
+        return False
     selected_gpu = 0
     try:
         env_hint = os.environ.get("CUDA_VISIBLE_DEVICES")
@@ -890,7 +950,6 @@ def run_external_program(start_hex, end_hex):
     base = [APP_PATH]
     if isinstance(APP_ARGS, str) and APP_ARGS.strip():
         base += shlex.split(APP_ARGS)
-    kind = (PROGRAM_KIND or "").strip().lower()
     if ("vanity" in kind) and not re.search(r"-gpuId\s+\d+", " ".join(base)):
         base += ["-gpuId", "0"]
     command = base + ["-i", IN_FILE, "-o", OUT_FILE, "--keyspace", keyspace]
