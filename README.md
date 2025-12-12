@@ -122,7 +122,10 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
 ⏳ Active: 50 mins
 ✅ Blocks: 1
 🔁 Consecutive: 1
-⚙️ GPU: NVIDIA GeForce RTX 3090 Ti
+⚙️ GPU: GPU#0 NVIDIA GeForce RTX 4090
+GPU#1 NVIDIA GeForce RTX 4090
+GPU#2 NVIDIA GeForce RTX 4090
+GPU#3 NVIDIA GeForce RTX 4090
 🧠 Algorithm: VanitySearch-V3
 🔧 Args: -gpu -gpuId 0 -g 1792,512
 🧭 Range: 75760acbd8897d9fe9:75760ace93076ccfe9
