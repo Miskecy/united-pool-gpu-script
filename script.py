@@ -151,6 +151,11 @@ PROCESSED_ONE_BLOCK = False
 NEED_NEW_BLOCK_FETCH = False
 LAST_RUN_OK = False
 
+GPU_PROGRESS = {}
+GPU_ORDER = []
+GPU_ACTIVE_LINES = 0
+GPU_LOCK = threading.Lock()
+
 GPU_LABEL_CACHE = None
 
 def _detect_gpu_label():
@@ -913,12 +918,46 @@ def _combine_gpu_out_files(count):
     except Exception:
         pass
 
+def _render_gpu_progress(gid, txt):
+    global GPU_PROGRESS, GPU_ORDER, GPU_ACTIVE_LINES
+    if not sys.stdout.isatty():
+        print(f"{Fore.CYAN}[GPU {gid}] {txt}{Style.RESET_ALL}", flush=True)
+        return
+    with GPU_LOCK:
+        GPU_PROGRESS[gid] = txt
+        if gid not in GPU_ORDER:
+            GPU_ORDER.append(gid)
+        n = len(GPU_ORDER)
+        if GPU_ACTIVE_LINES > 0:
+            sys.stdout.write(f"\x1b[{GPU_ACTIVE_LINES}A")
+        for g in GPU_ORDER:
+            sys.stdout.write("\x1b[2K")
+            sys.stdout.write(f"{Fore.CYAN}[GPU {g}] {GPU_PROGRESS.get(g, '')}{Style.RESET_ALL}\n")
+        GPU_ACTIVE_LINES = n
+        sys.stdout.flush()
+
+def _clear_gpu_progress():
+    global GPU_PROGRESS, GPU_ORDER, GPU_ACTIVE_LINES
+    if GPU_ACTIVE_LINES > 0 and sys.stdout.isatty():
+        sys.stdout.write(f"\x1b[{GPU_ACTIVE_LINES}A")
+        for _ in range(GPU_ACTIVE_LINES):
+            sys.stdout.write("\x1b[2K\n")
+        sys.stdout.flush()
+    GPU_PROGRESS = {}
+    GPU_ORDER = []
+    GPU_ACTIVE_LINES = 0
+
 def _stream_gpu_output(proc, gid):
     try:
+        progress_re = re.compile(r"(MK/s|keys/s)", re.IGNORECASE)
         for raw in proc.stdout:
             txt = (raw or "").rstrip("\n").strip()
-            if txt:
-                print(f"{Fore.CYAN}[GPU {gid}] {txt}{Style.RESET_ALL}", flush=True)
+            if not txt:
+                continue
+            if progress_re.search(txt):
+                _render_gpu_progress(gid, txt)
+                continue
+            print(f"{Fore.CYAN}[GPU {gid}] {txt}{Style.RESET_ALL}", flush=True)
     except Exception:
         pass
 
@@ -1002,6 +1041,7 @@ def run_external_program(start_hex, end_hex):
                 t.join(timeout=1.0)
             except Exception:
                 pass
+        _clear_gpu_progress()
         _combine_gpu_out_files(len(gpu_ids))
         if ok_all:
             try:
