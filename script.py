@@ -1318,7 +1318,10 @@ if __name__ == "__main__":
         if current_keyspace != previous_keyspace:
             previous_keyspace = current_keyspace
             gpu_labels = _detect_gpu_labels()
-            gpu_label = ", ".join(gpu_labels) if gpu_labels else _detect_gpu_label()
+            if gpu_labels:
+                gpu_label = "\n" + ",\n".join(gpu_labels)
+            else:
+                gpu_label = _detect_gpu_label()
             algo_label = _program_label()
             update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label, "arguments": _status_program_args()})
             logger("Info", f"New block notification sent: {current_keyspace}")
