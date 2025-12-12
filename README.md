@@ -109,7 +109,7 @@ Telegram messaging is provided by a dedicated module `telegram_status.py`. The s
     -   `🔑 Keyfound: <code>N saved to KEYFOUND.txt</code>`
     -   `⏱️ Next Fetch: <code>Xs</code>`
     -   `🧱 Total Length: <code>accumulated keyspace</code>` (K/M/G/T/P units)
-    -   `🕒 Updated <i>time ago</i>`
+    -   `🕒 Updated timestamp`
     -   `🏁 All blocks solved ✅` when applicable
 
 ### Example
@@ -136,7 +136,7 @@ GPU#3 NVIDIA GeForce RTX 4090
 🔑 Keyfound: -
 ⏱️ Next Fetch: 0s
 🧱 Total Length: 1.23G
-🕒 Updated 3 mins ago
+🕒 Updated 2025-12-12 04:32:18
 ```
 
 ### Notes
