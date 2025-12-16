@@ -315,15 +315,28 @@ def notify_error(category, message, api_offline=False, sleep_seconds=0, rate_lim
     cnt = _record_error(category)
     if cnt >= 3:
         try:
-            send_telegram_notification(f"❌ Auto-exit after 3 errors in '{category}'.")
+            send_telegram_notification(f"❌ Error threshold reached in '{category}'. Resetting state.")
         except Exception:
             pass
         try:
-            sys.exit(1)
-        except SystemExit:
-            raise
+            PENDING_KEYS = []
+            _save_pending_keys()
         except Exception:
             pass
+        try:
+            if os.path.exists(PENDING_KEYS_FILE):
+                os.remove(PENDING_KEYS_FILE)
+        except Exception:
+            pass
+        try:
+            clean_io_files()
+        except Exception:
+            pass
+        try:
+            globals()["NEED_NEW_BLOCK_FETCH"] = True
+        except Exception:
+            pass
+        return
 
 def _load_pending_keys():
     global PENDING_KEYS
@@ -837,7 +850,7 @@ def save_addresses_to_in_file(addresses, additional_addresses):
         logger("Info", f"Addresses saved to '{IN_FILE}'. Total: {len(all_addresses)}")
     except Exception as e:
         logger("Error", f"Failed to save addresses to '{IN_FILE}': {e}")
-        sys.exit(1)
+        return False
 
 def clean_io_files():
     try:
@@ -1241,100 +1254,114 @@ if __name__ == "__main__":
     STATUS["session_consecutive"] = 0
     STATUS["session_keyspace_total"] = 0
     while True:
-        refresh_settings()
-        flush_pending_keys_blocking()
-        if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
-            NEED_NEW_BLOCK_FETCH = False
-            update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": 0})
-            logger("Info", "Incompatible keys detected and cleared. Fetching a new block immediately.")
-            continue
-        if ONE_SHOT and PROCESSED_ONE_BLOCK:
-            logger("Info", "One-shot mode enabled. Exiting after first block.")
-            break
-        # 1. Fetch block data
-        block_data = fetch_block_data()
-        
-        if ALL_BLOCKS_SOLVED:
-            break
-        if not block_data:
-            logger("Error", "Could not fetch block data. Retrying in 30 seconds.")
-            time.sleep(30)
-            continue
-
-        addresses = block_data.get("checkwork_addresses", [])
-        range_data = block_data.get("range", {})
-        start_hex = range_data.get("start", "").replace("0x", "")
-        end_hex = range_data.get("end", "").replace("0x", "")
-        block_size = 0
         try:
-            if start_hex and end_hex:
-                block_size = int(end_hex, 16) - int(start_hex, 16)
-        except Exception:
+            refresh_settings()
+            flush_pending_keys_blocking()
+            if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
+                NEED_NEW_BLOCK_FETCH = False
+                update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": 0})
+                logger("Info", "Incompatible keys detected and cleared. Fetching a new block immediately.")
+                continue
+            if ONE_SHOT and PROCESSED_ONE_BLOCK:
+                logger("Info", "One-shot mode enabled. Exiting after first block.")
+                break
+            block_data = fetch_block_data()
+            if ALL_BLOCKS_SOLVED:
+                break
+            if not block_data:
+                logger("Error", "Could not fetch block data. Retrying in 30 seconds.")
+                time.sleep(30)
+                continue
+            addresses = block_data.get("checkwork_addresses", [])
+            range_data = block_data.get("range", {})
+            start_hex = range_data.get("start", "").replace("0x", "")
+            end_hex = range_data.get("end", "").replace("0x", "")
             block_size = 0
-        current_keyspace = f"{start_hex}:{end_hex}" # (NEW)
-
-        if not addresses:
-            notify_error("no_addresses", "No addresses in block", api_offline=False, sleep_seconds=30, rate_limit=120)
-            continue
-
-        if not (start_hex and end_hex):
-            notify_error("missing_key_range", "Key range missing", api_offline=False, sleep_seconds=30, rate_limit=120)
-            continue
-        
-        # 2. New: New block notification logic
-        if current_keyspace != previous_keyspace:
-            previous_keyspace = current_keyspace
-            gpu_labels = _detect_gpu_labels()
-            if gpu_labels:
-                gpu_label = "\n" + "\n".join(gpu_labels)
-            else:
-                gpu_label = _detect_gpu_label()
-            algo_label = _program_label()
-            update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label, "arguments": _status_program_args()})
-            logger("Info", f"New block notification sent: {current_keyspace}")
-
-        # Track current dynamic requirements
-        try:
-            CURRENT_ADDR_COUNT = int(len(addresses) or 10)
-            CURRENT_RANGE_START = start_hex
-            CURRENT_RANGE_END = end_hex
-        except Exception:
-            pass
-
-        # 3. Save addresses to in.txt
-        save_addresses_to_in_file(addresses, ADDITIONAL_ADDRESSES)
-        
-        # 4. Run external program (no chunking)
-        ran_ok = run_external_program(start_hex, end_hex)
-
-        # 5. Process output file (out.txt)
-        solution_found = process_out_file()
-
-        if ran_ok:
-            STATUS["session_blocks"] = int(STATUS.get("session_blocks", 0)) + 1
-            STATUS["session_consecutive"] = int(STATUS.get("session_consecutive", 0)) + 1
             try:
-                STATUS["session_keyspace_total"] = int(STATUS.get("session_keyspace_total", 0)) + int(block_size)
+                if start_hex and end_hex:
+                    block_size = int(end_hex, 16) - int(start_hex, 16)
+            except Exception:
+                block_size = 0
+            current_keyspace = f"{start_hex}:{end_hex}"
+            if not addresses:
+                notify_error("no_addresses", "No addresses in block", api_offline=False, sleep_seconds=30, rate_limit=120)
+                continue
+            if not (start_hex and end_hex):
+                notify_error("missing_key_range", "Key range missing", api_offline=False, sleep_seconds=30, rate_limit=120)
+                continue
+            if current_keyspace != previous_keyspace:
+                previous_keyspace = current_keyspace
+                gpu_labels = _detect_gpu_labels()
+                if gpu_labels:
+                    gpu_label = "\n" + "\n".join(gpu_labels)
+                else:
+                    gpu_label = _detect_gpu_label()
+                algo_label = _program_label()
+                update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label, "arguments": _status_program_args()})
+                logger("Info", f"New block notification sent: {current_keyspace}")
+            try:
+                CURRENT_ADDR_COUNT = int(len(addresses) or 10)
+                CURRENT_RANGE_START = start_hex
+                CURRENT_RANGE_END = end_hex
             except Exception:
                 pass
-        else:
-            STATUS["session_consecutive"] = 0
-
-        PROCESSED_ONE_BLOCK = True
-        # 6. Stop logic
-        if solution_found:
-            logger("Success", "ADDITIONAL ADDRESS KEY FOUND. Exiting script.")
-            break
-
-        flush_pending_keys_blocking()
-        if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
-            NEED_NEW_BLOCK_FETCH = False
-            update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": 0})
-            logger("Info", "Incompatible keys detected and cleared. Fetching a new block immediately.")
+            save_addresses_to_in_file(addresses, ADDITIONAL_ADDRESSES)
+            ran_ok = run_external_program(start_hex, end_hex)
+            solution_found = process_out_file()
+            if ran_ok:
+                STATUS["session_blocks"] = int(STATUS.get("session_blocks", 0)) + 1
+                STATUS["session_consecutive"] = int(STATUS.get("session_consecutive", 0)) + 1
+                try:
+                    STATUS["session_keyspace_total"] = int(STATUS.get("session_keyspace_total", 0)) + int(block_size)
+                except Exception:
+                    pass
+            else:
+                STATUS["session_consecutive"] = 0
+            PROCESSED_ONE_BLOCK = True
+            if solution_found:
+                logger("Success", "ADDITIONAL ADDRESS KEY FOUND. Exiting script.")
+                break
+            flush_pending_keys_blocking()
+            if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
+                NEED_NEW_BLOCK_FETCH = False
+                update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": 0})
+                logger("Info", "Incompatible keys detected and cleared. Fetching a new block immediately.")
+                continue
+            if ONE_SHOT:
+                logger("Info", "One-shot mode enabled. Exiting after first block.")
+                break
+            update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": POST_BLOCK_DELAY_SECONDS})
+            logger("Info", f"No critical solution this round. Waiting {POST_BLOCK_DELAY_SECONDS} seconds for next fetch.")
+            time.sleep(POST_BLOCK_DELAY_SECONDS)
+        except Exception as e:
+            try:
+                update_status_rl({"last_error": f"Main loop exception `{type(e).__name__}`"}, "main_loop_exception", 120)
+            except Exception:
+                pass
+            try:
+                logger("Error", f"Unhandled error in main loop: {e}")
+            except Exception:
+                pass
+            try:
+                PENDING_KEYS = []
+                _save_pending_keys()
+            except Exception:
+                pass
+            try:
+                if os.path.exists(PENDING_KEYS_FILE):
+                    os.remove(PENDING_KEYS_FILE)
+            except Exception:
+                pass
+            try:
+                clean_io_files()
+            except Exception:
+                pass
+            try:
+                globals()["NEED_NEW_BLOCK_FETCH"] = True
+            except Exception:
+                pass
+            try:
+                time.sleep(5)
+            except Exception:
+                pass
             continue
-        if ONE_SHOT:
-            logger("Info", "One-shot mode enabled. Exiting after first block.")
-            break
-        update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": POST_BLOCK_DELAY_SECONDS})
-        logger("Info", f"No critical solution this round. Waiting {POST_BLOCK_DELAY_SECONDS} seconds for next fetch.")
-        time.sleep(POST_BLOCK_DELAY_SECONDS)
