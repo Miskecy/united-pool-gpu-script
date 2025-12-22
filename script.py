@@ -150,6 +150,7 @@ ALL_BLOCKS_SOLVED = False
 PROCESSED_ONE_BLOCK = False
 NEED_NEW_BLOCK_FETCH = False
 LAST_RUN_OK = False
+POST_ERROR_CONSECUTIVE = 0
 
 GPU_LABEL_CACHE = None
 
@@ -429,6 +430,8 @@ def flush_pending_keys_blocking():
                 break
             else:
                 _save_pending_keys()
+                if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
+                    break
                 time.sleep(30)
     # Try a final post with fillers if we have some keys but fewer than required
     if not posted and LAST_RUN_OK and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
@@ -448,7 +451,10 @@ def flush_pending_keys_blocking():
                     _save_pending_keys()
                     NEED_NEW_BLOCK_FETCH = True
                 else:
-                    time.sleep(30)
+                    if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
+                        pass
+                    else:
+                        time.sleep(30)
     return posted
 
 def handle_next_block_immediately():
@@ -772,6 +778,10 @@ def post_private_keys(private_keys):
                 _clean_gpu_out_files()
             except Exception:
                 pass
+            try:
+                globals()["POST_ERROR_CONSECUTIVE"] = 0
+            except Exception:
+                pass
             return (True, False)
         else:
             txt = ""
@@ -785,6 +795,10 @@ def post_private_keys(private_keys):
                 ("incompatible private keys" in msg) or
                 ("not all private keys are correct" in msg)
             )
+            is_no_target_block = (
+                ("no target block found" in msg) or
+                ("provide blockid or have an active block" in msg)
+            )
             if not is_incompatible:
                 try:
                     js = response.json()
@@ -795,8 +809,25 @@ def post_private_keys(private_keys):
                             ("incompatible private keys" in em) or
                             ("not all private keys are correct" in em)
                         )
+                        if not is_no_target_block:
+                            is_no_target_block = (
+                                ("no target block found" in em) or
+                                ("provide blockid or have an active block" in em)
+                            )
                 except Exception:
                     pass
+            if 500 <= response.status_code <= 599:
+                snippet = ""
+                try:
+                    snippet = (response.text or "")[:120].replace("\n", " ")
+                except Exception:
+                    snippet = ""
+                logger("Error", f"Failed to send batch: Status {response.status_code}. Retrying in 30s.")
+                if snippet:
+                    logger("Info", f"Detail: {snippet}...")
+                update_status_rl({"last_batch": f"Server error {response.status_code}", "last_error": f"Post server error `{response.status_code}`"}, "post_server_error", 300)
+                notify_error("api_offline", f"Post server error `{response.status_code}`", api_offline=True, sleep_seconds=0, rate_limit=300)
+                return (False, False)
             if is_incompatible:
                 attempts = 1
                 while attempts < 3:
@@ -822,6 +853,39 @@ def post_private_keys(private_keys):
                 logger("Info", f"Detail: {snippet}...")
             update_status_rl({"last_batch": f"Failed status {response.status_code}", "last_error": f"Post error `{response.status_code}`"}, "post_error", 300)
             notify_error("post_error", f"Post error `{response.status_code}`", api_offline=False, sleep_seconds=0, rate_limit=300)
+            if is_no_target_block:
+                try:
+                    globals()["POST_ERROR_CONSECUTIVE"] = int(globals().get("POST_ERROR_CONSECUTIVE", 0)) + 1
+                except Exception:
+                    pass
+                try:
+                    cnt = int(globals().get("POST_ERROR_CONSECUTIVE", 0))
+                    if cnt >= 3:
+                        globals()["POST_ERROR_CONSECUTIVE"] = 0
+                        try:
+                            PENDING_KEYS = []
+                            _save_pending_keys()
+                        except Exception:
+                            pass
+                        try:
+                            if os.path.exists(PENDING_KEYS_FILE):
+                                os.remove(PENDING_KEYS_FILE)
+                        except Exception:
+                            pass
+                        try:
+                            clean_io_files()
+                        except Exception:
+                            pass
+                        try:
+                            globals()["NEED_NEW_BLOCK_FETCH"] = True
+                        except Exception:
+                            pass
+                        try:
+                            send_telegram_notification("Post errors: no active block. Resetting state.")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             return (False, False)
     except requests.RequestException as e:
         logger("Error", f"Connection error while sending batch: {type(e).__name__}. Retrying in 30s.")
