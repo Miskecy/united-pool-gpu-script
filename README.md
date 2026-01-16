@@ -22,7 +22,7 @@ The script is configured using the `settings.json` file.
 | `user_token`                  | Pool token for worker authentication                                            | `a1b2c3d4e5f6`                           |
 | `worker_name`                 | Human‑readable worker label used in Telegram                                    | `GPU-Rig-01`                             |
 | `additional_addresses`        | Optional list of target addresses to stop on                                    | `["1AbCd..."]`                           |
-| `program_path`                | Path to the cracking program binary                                             | `./VanitySearch-V3`                      |
+| `gpu_index_map`               | **(New)** Per-GPU configuration for binary paths and workload shares            | _See below_                              |
 | `program_arguments`           | Extra CLI arguments passed through verbatim                                     | `-g 1792,512`                            |
 | `program_name`                | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v3` (lowercase) | `vanitysearch-v3`                        |
 | `block_length`                | Requested block size (supports `K/M/B/T` suffixes)                              | `1T`                                     |
@@ -30,6 +30,28 @@ The script is configured using the `settings.json` file.
 | `post_block_delay_enabled`    | Enable delay between blocks                                                     | `true`                                   |
 | `post_block_delay_minutes`    | Delay between iterations in minutes                                             | `2`                                      |
 | `send_additional_keys_to_api` | Post keys found for `additional_addresses` to the API (default false)           | `false`                                  |
+
+### ⚙️ Advanced GPU Configuration (`gpu_index_map`)
+
+For mixed-GPU setups or to optimize performance across different cards, use `gpu_index_map`. This allows you to specify a different binary and workload share for each GPU index.
+
+**Example:**
+
+```json
+"gpu_index_map": {
+  "0": {
+    "alg_path": "./bin/vanitysearch86-v3",
+    "share": 65
+  },
+  "1": {
+    "alg_path": "./bin/vanitysearch75-v3",
+    "share": 35
+  }
+}
+```
+
+-   **`alg_path`**: The specific binary to run on this GPU (e.g., optimized for different CUDA Compute Capabilities).
+-   **`share`**: An integer weight for splitting the keyspace. In the example above, GPU 0 gets 65% of the work, and GPU 1 gets 35%.
 
 ---
 
@@ -150,14 +172,13 @@ GPU#3 NVIDIA GeForce RTX 4090
 -   HTML line breaks use real newlines (`\n`) and dynamic values are escaped to prevent parsing issues.
 -   On HTML errors during creation, the module falls back to plain‑text creation and continues editing thereafter.
 -   GPU entries in the `⚙️ GPU` line render one per line (no commas) for multi‑GPU setups.
--   `🧱 Total Length` accumulates the keyspace length per successfully processed block and shows a compact unit (K/M/G/T/P).
+-   `🧱 Total Length` accumulates the keyspace length per successfully processed block and shows a compact unit (K/M/G/T/P units).
 -   `🕒 Updated` now shows a human‑friendly time‑ago based on the last status update.
 
 ### GPU and Algorithm Detection
 
--   GPU name is detected by invoking your configured program with the `-l` flag and selecting the `GPU #<gpuId>` lines.
--   The Algorithm label is derived directly from the executable file name (`program_path` basename, without extension). Name it as you prefer (e.g., `VanitySearch`, `vanitysearch-v3`, `BitCrack`).
--   For `api_url`, surrounding backticks and whitespace are trimmed automatically if present.
+-   **GPU Detection:** The script now uses `nvidia-smi` (if available) to detect GPU details, including Compute Capability. This allows for smarter defaults in mixed environments.
+-   **Algorithm:** The Algorithm label is derived from the configured `alg_path` for each GPU.
 
 ---
 
@@ -172,11 +193,12 @@ GPU#3 NVIDIA GeForce RTX 4090
 
 ### ⚡ Multi‑GPU Mode
 
--   When multiple GPUs are detected via your binary’s `-l` listing, the script automatically:
-    -   Splits the fetched keyspace evenly into N segments (where N = GPU count).
-    -   Launches N subprocesses, one per GPU, printing per‑GPU start lines and live output.
+-   When multiple GPUs are detected, the script automatically:
+    -   Splits the fetched keyspace into N segments.
+        -   **Weighted Splitting:** If `share` values are provided in `gpu_index_map`, the keyspace is split proportionally (e.g., a faster GPU gets a larger range).
+        -   **Even Splitting:** Default behavior if no shares are defined.
+    -   Launches N subprocesses, one per GPU.
     -   Writes per‑GPU outputs to `out_gpu_<i>.txt` and merges them back into `out.txt` for parsing.
-    -   Cleans `out_gpu_<i>.txt` at start, after each run, after key posting, and after `out.txt` is cleared.
 -   VanitySearch/VanitySearch‑V2: the script adds `-gpuId <gid>` automatically per subprocess and filters any `-gpuId` you set in `program_arguments` to avoid conflicts.
 -   Other tools: if your binary requires a device selector flag (e.g., BitCrack), include it in `program_arguments`. The script passes it through per subprocess.
 
@@ -197,106 +219,3 @@ The script reloads `settings.json` before starting each new work cycle. You can 
 -   BitCrack (official): https://github.com/brichard19/BitCrack
 
 Notes:
-
--   VanitySearch‑V2 supports `--keyspace` and multi‑address scanning. The script now supports multi‑GPU in a single instance by splitting the range and launching one subprocess per GPU.
--   Configure runtime via `program_path`, `program_arguments`, and `program_name`.
-
--   `in.txt`: Input addresses file used by the cracking application.
--   `out.txt`: Output file generated by the selected cracking program.
--   `KEYFOUND.txt`: Stores `addr:priv` pairs when an `additional_address` key is successfully found.
--   `pending_keys.json`: Queue of private keys awaiting batch submission to the API. Flushed in dynamic batches (10–30), with range‑safe filler keys automatically added when the queue is short; cleared after **3 failed retries** on API "incompatible privatekeys" responses.
--   `telegram_state.json`: Persists the Telegram `message_id` per worker to enable single‑message editing across restarts.
-    -   `telegram_status.py`: External module that manages Telegram status creation/editing and notifications.
-
-### API Payload Format (privateKeys)
-
--   Posted keys are an array of 64‑character hex strings (uppercase), without `0x`.
--   Example: `{"privateKeys": ["0000...195B", "0000...846F", ...]}`
-
-### Output Parsing
-
-    -   `output_parsers.py` routes based on `program_name` and supports VanitySearch‑V2 padded formats.
-    -   For VanitySearch‑V3, lines like `Priv (HEX): 0x <padded hex>` are normalized to 64 hex characters.
-    -   `bash safety_monitor.sh -g all`
-
-### 🧹 Cleanup & Reliability
-
--   `out_gpu_<i>.txt` files are cleaned at start, before each run, after a successful run, after `out.txt` is cleared, and after a successful key post.
--   Batch size for submissions is derived from `in.txt` to match the block’s `checkwork_addresses` count.
--   Filler keys are generated only when the previous run completed successfully; they are disabled after failures.
--   When `send_additional_keys_to_api` is `true`, keys found for `additional_addresses` are also posted to the API in a dedicated call, in addition to being saved to `KEYFOUND.txt`.
-
----
-
-## Bot Controller
-
-The repository includes an optional Telegram‑based controller (`bot_controller.py`) that listens for commands and controls the worker script (`script.py`). It requires a Telegram bot token and chat ID and works alongside the existing status notifications.
-
-### Setup
-
--   Configure `settings.json`:
-    -   `telegram_accesstoken`: your Telegram bot token
-    -   `telegram_chatid`: your chat ID
-    -   `worker_name`: human‑readable server name (used for targeting)
--   Start the controller:
-    ```bash
-    python bot_controller.py
-    ```
-
-### Server Targeting
-
--   Each machine derives its server name from `worker_name` (or `SERVER_NAME` env, or system `COMPUTERNAME/HOSTNAME`).
--   Set a target with `/server <name>` to apply commands only to matching servers.
--   Clear the target with `/cleartarget` to broadcast commands again.
--   Commands also accept an inline target: `/stopscript <name>`.
-
-### Server Discovery
-
--   Use `/serverlist` to discover available servers. The controller broadcasts presence and aggregates responses for a short window, then returns a formatted list.
-
-### Safety Behavior
-
--   If `bot_controller.py` exits unexpectedly or is stopped, it attempts to terminate any worker process it started. This prevents orphaned workers.
-
-### Commands
-
--   `/server <name>`: set target server name for subsequent commands.
--   `/cleartarget`: clear current target; broadcast commands to all.
--   `/startscript [name]`: start `script.py` on targeted servers.
--   `/stopscript [name]`: stop `script.py` on targeted servers.
--   `/restartscript [name]`: restart `script.py` on targeted servers.
--   `/status [name]`: show local status, server name, and current target.
--   `/whoami`: show local server name.
--   `/serverlist`: list discovered servers.
--   `/reloadsettings`: reload `settings.json` into the controller.
--   `/get <key>`: show the current value for `<key>`.
--   `/set <key> <value>`: update the value for `<key>`.
-
-### `/get` and `/set` Details
-
--   Available keys are derived from `settings.json` and typically include:
-
-    -   `api_url`: API base URL
-    -   `user_token`: pool token
-    -   `worker_name`: server name
-    -   `program_name`: program identifier
-    -   `program_path`: executable path
-    -   `program_arguments`: CLI arguments
-    -   `block_length`: keyspace block size
-    -   `oneshot`: single‑block mode (bool)
-    -   `post_block_delay_enabled`: delay toggle (bool)
-    -   `post_block_delay_minutes`: delay minutes
-    -   `additional_addresses`: list of extra addresses
-    -   `telegram_share`: share toggle (bool)
-    -   `telegram_accesstoken`: bot token
-    -   `telegram_chatid`: chat ID
-
--   Value parsing:
-    -   `true`/`false` → booleans
-    -   numeric strings → integers/floats
-    -   JSON objects/arrays → parsed structures
-    -   other → raw string
-
-### Help Output
-
--   The controller’s `/help` uses rich formatting (HTML) and includes targeting, worker control, settings management, and the dynamic list of available keys.
