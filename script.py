@@ -178,16 +178,21 @@ def _detect_gpu_details():
     """
     details = {}
     try:
-        labels = _detect_gpu_labels()
-        for ln in labels:
-            m = re.match(r"^\s*GPU#?(\d+)\s+(.*)$", ln, re.IGNORECASE)
-            if not m:
+        cmd = ["nvidia-smi", "--query-gpu=index,name", "--format=csv,noheader"]
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
+            out, _ = p.communicate(timeout=5)
+        for ln in (out or "").splitlines():
+            parts = [x.strip() for x in ln.split(",") if x.strip()]
+            if not parts:
                 continue
             try:
-                gid = int(m.group(1))
+                gid = int(parts[0])
             except Exception:
                 continue
-            name = m.group(2).strip()
+            name = ""
+            if len(parts) >= 2:
+                name = parts[1]
+            name = name.strip()
             if not name:
                 continue
             if gid not in details:
@@ -197,6 +202,27 @@ def _detect_gpu_details():
                     details[gid]["name"] = name
     except Exception:
         pass
+    if not details:
+        try:
+            labels = _detect_gpu_labels()
+            for ln in labels:
+                m = re.match(r"^\s*GPU#?(\d+)\s+(.*)$", ln, re.IGNORECASE)
+                if not m:
+                    continue
+                try:
+                    gid = int(m.group(1))
+                except Exception:
+                    continue
+                name = m.group(2).strip()
+                if not name:
+                    continue
+                if gid not in details:
+                    details[gid] = {"name": name}
+                else:
+                    if not details[gid].get("name"):
+                        details[gid]["name"] = name
+        except Exception:
+            pass
     return details
 
 def _get_program_path_for_gpu(gpu_id, gpu_details):
