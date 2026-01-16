@@ -48,6 +48,7 @@ APP_PATH = ""
 APP_ARGS = ""
 PROGRAM_KIND = "vanity"
 WORKER_NAME = ""
+GPU_INDEX_MAP = {}
 SEND_ADDITIONAL_KEYS_TO_API = False
 
 ONE_SHOT = False
@@ -60,7 +61,7 @@ LAST_MESSAGE_HASH = None
 
 def _apply_settings(s):
     global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_URL, POOL_TOKEN, ADDITIONAL_ADDRESSES, BLOCK_LENGTH
-    global APP_PATH, APP_ARGS, PROGRAM_KIND, WORKER_NAME, ONE_SHOT
+    global APP_PATH, APP_ARGS, PROGRAM_KIND, WORKER_NAME, ONE_SHOT, GPU_INDEX_MAP
     global POST_BLOCK_DELAY_SECONDS, POST_BLOCK_DELAY_ENABLED
     TELEGRAM_BOT_TOKEN = s.get("telegram_accesstoken", "")
     TELEGRAM_CHAT_ID = str(s.get("telegram_chatid", ""))
@@ -81,10 +82,8 @@ def _apply_settings(s):
     BLOCK_LENGTH = s.get("block_length", "")
     APP_PATH = s.get("program_path")
     APP_ARGS = s.get("program_arguments")
-    PROGRAM_KIND = str(s.get("program_name", "")).strip().lower()
-    if PROGRAM_KIND and "|" in PROGRAM_KIND:
-        PROGRAM_KIND = PROGRAM_KIND.split("|")[0].strip().lower()
-    WORKER_NAME = s.get("worker_name", "") or s.get("workername", "")
+    GPU_INDEX_MAP = s.get("gpu_index_map", {})
+    
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         if APP_PATH and "|" in APP_PATH:
@@ -98,6 +97,12 @@ def _apply_settings(s):
             APP_PATH = os.path.normpath(os.path.join(base_dir, APP_PATH))
     except Exception:
         pass
+        
+    PROGRAM_KIND = str(s.get("program_name", "")).strip().lower()
+    if PROGRAM_KIND and "|" in PROGRAM_KIND:
+        PROGRAM_KIND = PROGRAM_KIND.split("|")[0].strip().lower()
+    WORKER_NAME = s.get("worker_name", "") or s.get("workername", "")
+    
     ONE_SHOT = bool(s.get("oneshot", False))
     try:
         SEND_ADDITIONAL_KEYS_TO_API = bool(s.get("send_additional_keys_to_api", False))
@@ -153,6 +158,67 @@ LAST_RUN_OK = False
 POST_ERROR_CONSECUTIVE = 0
 
 GPU_LABEL_CACHE = None
+
+def _resolve_path(path):
+    try:
+        if not path:
+            return path
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        if not os.path.isabs(path):
+            cand = os.path.normpath(os.path.join(base_dir, path))
+            if os.path.exists(cand):
+                return cand
+        return path
+    except Exception:
+        return path
+
+def _detect_gpu_details():
+    """
+    Returns a dict {gpu_id (int): {'name': str}}
+    """
+    details = {}
+    try:
+        labels = _detect_gpu_labels()
+        for ln in labels:
+            m = re.match(r"^\s*GPU#?(\d+)\s+(.*)$", ln, re.IGNORECASE)
+            if not m:
+                continue
+            try:
+                gid = int(m.group(1))
+            except Exception:
+                continue
+            name = m.group(2).strip()
+            if not name:
+                continue
+            if gid not in details:
+                details[gid] = {"name": name}
+            else:
+                if not details[gid].get("name"):
+                    details[gid]["name"] = name
+    except Exception:
+        pass
+    return details
+
+def _get_program_path_for_gpu(gpu_id, gpu_details):
+    """
+    Resolves the correct program path for a given GPU.
+    Uses GPU_INDEX_MAP (per-index) and falls back to APP_PATH.
+    """
+    if GPU_INDEX_MAP:
+        try:
+            key = str(int(gpu_id))
+        except Exception:
+            key = str(gpu_id)
+        mapped = GPU_INDEX_MAP.get(key)
+        if mapped:
+            path = None
+            if isinstance(mapped, dict):
+                path = mapped.get("alg_path") or mapped.get("path")
+            else:
+                path = mapped
+            if path:
+                return _resolve_path(path)
+    return APP_PATH
 
 def _detect_gpu_label():
     global GPU_LABEL_CACHE
@@ -227,6 +293,26 @@ def _detect_gpu_labels():
 
 def _detect_gpu_list():
     try:
+        # Prefer nvidia-smi if available for robust detection
+        cmd = ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"]
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as p:
+            out, _ = p.communicate(timeout=5)
+        
+        ids = []
+        for line in (out or "").splitlines():
+            try:
+                ids.append(int(line.strip()))
+            except ValueError:
+                pass
+        
+        if ids:
+            return sorted(list(set(ids)))
+            
+    except Exception:
+        pass
+        
+    # Fallback to legacy method (parsing app -l output)
+    try:
         if APP_PATH:
             cmd = [APP_PATH, "-l"]
             with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p:
@@ -256,6 +342,25 @@ def _detect_gpu_list():
 
 def _program_label():
     try:
+        paths = []
+        if GPU_INDEX_MAP:
+            for v in GPU_INDEX_MAP.values():
+                p = None
+                if isinstance(v, dict):
+                    p = v.get("alg_path") or v.get("path")
+                else:
+                    p = v
+                if p:
+                    paths.append(p)
+        if paths:
+            names = []
+            for p in paths:
+                base = os.path.basename(str(p))
+                name, _ext = os.path.splitext(base)
+                if name and name not in names:
+                    names.append(name)
+            if names:
+                return " + ".join(names)
         path = APP_PATH or ""
         if path:
             base = os.path.basename(path)
@@ -976,6 +1081,54 @@ def _split_keyspace(start_hex, end_hex, parts):
     except Exception:
         return [(str(start_hex), str(end_hex))]
 
+def _split_keyspace_weighted(start_hex, end_hex, gpu_ids):
+    try:
+        s = int(str(start_hex), 16)
+        e = int(str(end_hex), 16)
+        if e <= s or not gpu_ids:
+            return [(str(start_hex), str(end_hex))]
+        length = e - s
+        weights = []
+        for gid in gpu_ids:
+            w = None
+            try:
+                if GPU_INDEX_MAP:
+                    key = str(int(gid))
+                    cfg = GPU_INDEX_MAP.get(key)
+                    if isinstance(cfg, dict):
+                        w = cfg.get("share")
+            except Exception:
+                w = None
+            if w is None:
+                w = 1
+            try:
+                w = float(w)
+            except Exception:
+                w = 1.0
+            if w < 0:
+                w = 0.0
+            weights.append(w)
+        total = sum(weights)
+        if total <= 0:
+            return _split_keyspace(start_hex, end_hex, len(gpu_ids))
+        segments = []
+        cur = s
+        acc = 0.0
+        for idx, w in enumerate(weights):
+            if idx == len(weights) - 1:
+                si = cur
+                ei = e
+            else:
+                acc += w
+                target = s + int((length * acc) / total)
+                si = cur
+                ei = target
+                cur = target
+            segments.append((f"{si:x}", f"{ei:x}"))
+        return segments
+    except Exception:
+        return _split_keyspace(start_hex, end_hex, len(gpu_ids))
+
 def _combine_gpu_out_files(count):
     try:
         with open(OUT_FILE, "w") as out:
@@ -1026,15 +1179,19 @@ def run_external_program(start_hex, end_hex):
     _clean_gpu_out_files()
     logger("Info", f"Running with keyspace: {Fore.GREEN}{keyspace}{Style.RESET_ALL}")
     gpu_ids = _detect_gpu_list()
+    gpu_details = _detect_gpu_details()
     kind = (PROGRAM_KIND or "").strip().lower()
     if len(gpu_ids) > 1:
-        segments = _split_keyspace(start_hex, end_hex, len(gpu_ids))
+        segments = _split_keyspace_weighted(start_hex, end_hex, gpu_ids)
         procs = []
         threads = []
         first_fail = None
         for idx, gid in enumerate(gpu_ids):
             outp = _gpu_out_path(idx)
-            base = [APP_PATH]
+            
+            this_app_path = _get_program_path_for_gpu(gid, gpu_details)
+            base = [this_app_path]
+            
             if isinstance(APP_ARGS, str) and APP_ARGS.strip():
                 parsed = shlex.split(APP_ARGS)
                 filtered = []
@@ -1053,7 +1210,8 @@ def run_external_program(start_hex, end_hex):
             try:
                 p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 procs.append(p)
-                print(f"{Fore.CYAN}[GPU {gid}] started {segments[idx][0]}:{segments[idx][1]}{Style.RESET_ALL}")
+                prog_name = os.path.basename(this_app_path) if this_app_path else "unknown"
+                print(f"{Fore.CYAN}[GPU {gid}] started {segments[idx][0]}:{segments[idx][1]} using {prog_name}{Style.RESET_ALL}")
                 t = threading.Thread(target=_stream_gpu_output, args=(p, gid), daemon=True)
                 t.start()
                 threads.append(t)
@@ -1110,7 +1268,10 @@ def run_external_program(start_hex, end_hex):
             selected_gpu = int(m.group(1))
     except Exception:
         selected_gpu = 0
-    base = [APP_PATH]
+    
+    this_app_path = _get_program_path_for_gpu(selected_gpu, gpu_details)
+    base = [this_app_path]
+    
     if isinstance(APP_ARGS, str) and APP_ARGS.strip():
         base += shlex.split(APP_ARGS)
     if ("vanity" in kind) and not re.search(r"-gpuId\s+\d+", " ".join(base)):
@@ -1355,11 +1516,26 @@ if __name__ == "__main__":
                 continue
             if current_keyspace != previous_keyspace:
                 previous_keyspace = current_keyspace
-                gpu_labels = _detect_gpu_labels()
-                if gpu_labels:
-                    gpu_label = "\n" + "\n".join(gpu_labels)
-                else:
-                    gpu_label = _detect_gpu_label()
+                gpu_label = "-"
+                try:
+                    details = _detect_gpu_details()
+                    if details:
+                        lines = []
+                        for gid in sorted(details.keys()):
+                            info = details.get(gid) or {}
+                            name = str(info.get("name") or "").strip()
+                            if name:
+                                lines.append(f"GPU#{gid} {name}")
+                        if lines:
+                            gpu_label = "\n" + "\n".join(lines)
+                except Exception:
+                    gpu_label = "-"
+                if not gpu_label or gpu_label == "-":
+                    gpu_labels = _detect_gpu_labels()
+                    if gpu_labels:
+                        gpu_label = "\n" + "\n".join(gpu_labels)
+                    else:
+                        gpu_label = _detect_gpu_label()
                 algo_label = _program_label()
                 update_status({"range": current_keyspace, "addresses": len(addresses), "gpu": gpu_label, "algorithm": algo_label, "arguments": _status_program_args()})
                 logger("Info", f"New block notification sent: {current_keyspace}")

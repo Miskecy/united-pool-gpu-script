@@ -4,7 +4,16 @@
     "user_token": "YOUR_POOL_TOKEN",
     "worker_name": "your_worker_name",
     "program_name": "VanitySearch | cuBitCrack | VanitySearch-V3",
-    "program_path": "./VanitySearch | ./cuBitCrack | ./VanitySearch-V3",
+    "gpu_index_map": {
+        "0": {
+            "alg_path": "./bin/vanitysearch86-v3",
+            "share": 65
+        },
+        "1": {
+            "alg_path": "./bin/vanitysearch75-v3",
+            "share": 35
+        }
+    },
     "program_arguments": "",
     "block_length": "1T",
     "oneshot": false,
