@@ -1,91 +1,214 @@
 # United GPU Script
 
 <p align="center">
-  <img  src="/index.jpg">
+  <img src="/index.jpg">
 </p>
 
-## Overview
-
-This script fetches work blocks from a pool API, executes GPU cracking software (`VanitySearch-V3` or `BitCrack`), and manages the generated private keys. Key management includes sending real-time status notifications via Telegram and submitting found keys in batches to the API.
-
-Supports any number of GPUs with automatic detection via `nvidia-smi`, per-GPU binary selection, and weighted keyspace splitting.
+A worker script for [United Puzzle Pool](https://unitedpuzzlepool.com). Fetches work blocks from the pool API, runs GPU cracking software (`VanitySearch-V3` or `BitCrack`) across all detected GPUs, and submits results automatically. Supports any number of GPUs with weighted keyspace splitting and real-time Telegram status updates.
 
 ---
 
-## Setup
+## Table of Contents
 
-Run `miner_setup.sh` on a fresh Ubuntu 22.04 machine to install all dependencies automatically:
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Getting Your Binaries](#getting-your-binaries)
+- [Configuration](#configuration)
+- [Telegram Setup](#telegram-setup)
+- [Running the Miner](#running-the-miner)
+- [Managing in the Background (VPS / SSH)](#managing-in-the-background-vps--ssh)
+- [How It Works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Requirements
+
+- Ubuntu 22.04 (other Debian-based distros may work)
+- NVIDIA GPU(s) with CUDA 12.1 compatible drivers
+- Python 3.8+
+- Internet access to reach the pool API
+
+---
+
+## Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/Miskecy/united-pool-gpu-script.git
+cd united-pool-gpu-script
+```
+
+### 2. Run the automated setup script
 
 ```bash
 bash miner_setup.sh
 ```
 
-The script is fully resilient — it continues even if individual steps fail (e.g. NVIDIA download issues) and prints a summary of warnings and errors at the end. It handles:
+This installs everything needed and continues even if individual steps fail (e.g. NVIDIA download issues). It handles:
 
-- System packages (`build-essential`, `git`, `python3`, `wget`, etc.)
-- NVIDIA CUDA 12.1 repository and packages (skipped gracefully if unavailable)
+- System packages: `build-essential`, `git`, `python3`, `wget`, `curl`, `ca-certificates`
+- NVIDIA CUDA 12.1 repository, compiler, libraries, and runtime
 - CUDA environment variables written to `~/.bashrc`
-- CUDA libs registered with `ldconfig` so `libcudart.so.12` is found in any shell session — no need to manually set `LD_LIBRARY_PATH`
-- Python dependencies: `requests`, `colorama`
-- Repository clone (or `git pull` if already present)
+- CUDA libs registered system-wide via `ldconfig` — no need to manually set `LD_LIBRARY_PATH`
+- Python packages: `requests`, `colorama`
 - Execute permissions on binaries in `bin/`
 
-After setup, place your GPU binaries in `bin/` and configure `settings.json`.
+At the end it prints a summary of any warnings or errors.
 
-> **Note:** If you add binaries to `bin/` after running setup, you do **not** need to `chmod +x` them manually. `script.py` automatically ensures each binary is executable before launching it.
+### 3. Reload your shell environment
+
+```bash
+source ~/.bashrc
+```
+
+### 4. Verify CUDA is available
+
+```bash
+nvcc --version
+nvidia-smi
+```
+
+---
+
+## Getting Your Binaries
+
+The script does **not** include pre-built GPU binaries. You need to build or download them separately and place them in the `bin/` folder.
+
+### VanitySearch-V3 (recommended)
+
+Repository: https://github.com/Miskecy/VanitySearch-V3
+
+Build for your GPU's Compute Capability:
+
+| GPU Generation | Compute Capability | Build flag |
+| :------------- | :----------------- | :--------- |
+| RTX 40xx | sm_89 | `CCAP=89` |
+| RTX 30xx | sm_86 | `CCAP=86` |
+| RTX 20xx / GTX 16xx | sm_75 | `CCAP=75` |
+| GTX 10xx | sm_61 | `CCAP=61` |
+
+```bash
+git clone https://github.com/Miskecy/VanitySearch-V3.git
+cd VanitySearch-V3
+make CCAP=86        # replace 86 with your GPU's compute capability
+cp vanitysearch ../united-pool-gpu-script/bin/vanitysearch86-v3
+```
+
+If you have mixed GPUs, build once per compute capability and place both binaries in `bin/`.
+
+### BitCrack (alternative)
+
+Repository: https://github.com/brichard19/BitCrack
+
+```bash
+git clone https://github.com/brichard19/BitCrack.git
+cd BitCrack
+make BUILD_CUDA=1
+cp bin/cuBitCrack ../united-pool-gpu-script/bin/
+```
+
+> You do **not** need to `chmod +x` binaries manually. The script auto-marks them executable before each launch.
 
 ---
 
 ## Configuration
 
-The script is configured using the `settings.json` file. It is reloaded before every work cycle, so changes take effect without restarting.
+Copy `settings_model.json` to `settings.json` and fill in your values:
 
-### Key Fields
+```bash
+cp settings_model.json settings.json
+nano settings.json
+```
+
+`settings.json` is reloaded before every work cycle — changes take effect without restarting.
+
+### Full settings reference
+
+```json
+{
+    "api_url": "https://unitedpuzzlepool.com/api/block",
+    "user_token": "YOUR_POOL_TOKEN",
+    "worker_name": "GPU-Rig-01",
+    "additional_addresses": ["1YourTargetBitcoinAddress..."],
+    "program_name": "vanitysearch-v3",
+    "gpu_index_map": { ... },
+    "program_arguments": "",
+    "block_length": "1T",
+    "oneshot": false,
+    "post_block_delay_enabled": false,
+    "post_block_delay_minutes": 1,
+    "send_additional_keys_to_api": false,
+    "telegram_accesstoken": "YOUR_BOT_TOKEN",
+    "telegram_chatid": "YOUR_CHAT_ID"
+}
+```
 
 | Field | Description | Example |
 | :---- | :---------- | :------ |
-| `api_url` | API base URL for fetching work blocks and posting results | `https://unitedpuzzlepool.com/api/block` |
-| `user_token` | Pool token for worker authentication | `a1b2c3d4e5f6` |
-| `worker_name` | Human-readable worker label shown in Telegram | `GPU-Rig-01` |
-| `additional_addresses` | List of target addresses — script stops and saves key if found | `["1AbCd..."]` |
-| `gpu_index_map` | Per-GPU binary path and workload share — see below | |
-| `program_arguments` | Extra CLI arguments passed verbatim to the binary | `-g 1792,512` |
-| `program_name` | Behavior selector: `vanitysearch`, `bitcrack`, or `vanitysearch-v3` | `vanitysearch-v3` |
-| `block_length` | Requested block size (supports `K/M/B/T` suffixes) | `1T` |
-| `oneshot` | Run a single cycle and exit | `false` |
-| `post_block_delay_enabled` | Enable delay between blocks | `true` |
-| `post_block_delay_minutes` | Delay between iterations in minutes | `2` |
-| `send_additional_keys_to_api` | Also post keys found for `additional_addresses` to the API | `false` |
+| `api_url` | Pool API base URL | `https://unitedpuzzlepool.com/api/block` |
+| `user_token` | Your pool authentication token | `IOxQ4EbVt...` |
+| `worker_name` | Label shown in Telegram notifications | `GPU-Rig-01` |
+| `additional_addresses` | Bitcoin addresses to watch — script stops and saves the key if found | `["1PWo3J..."]` |
+| `program_name` | Parser mode: `vanitysearch-v3`, `vanitysearch`, or `bitcrack` | `vanitysearch-v3` |
+| `gpu_index_map` | Per-GPU binary and workload share — see below | |
+| `program_arguments` | Extra CLI flags passed verbatim to the binary | `-g 1792,512` |
+| `block_length` | Requested keyspace size (K/M/B/T suffixes supported) | `1T` |
+| `oneshot` | Exit after one complete block instead of looping | `false` |
+| `post_block_delay_enabled` | Wait between blocks | `false` |
+| `post_block_delay_minutes` | How long to wait between blocks (minutes) | `1` |
+| `send_additional_keys_to_api` | Also submit keys found for `additional_addresses` to the pool | `false` |
+| `telegram_accesstoken` | Telegram bot token | `123456:ABC...` |
+| `telegram_chatid` | Telegram chat/user ID to send status to | `468056589` |
 
-### GPU Configuration (`gpu_index_map`)
+### Getting your pool token
 
-`gpu_index_map` controls which binary runs on each GPU and how the keyspace is divided between them.
+**Option A — Web UI:**
 
-**`alg_path`** — binary to use for that GPU. Useful when GPUs have different CUDA Compute Capabilities and need different builds (e.g. sm_86 for RTX 30xx/40xx, sm_75 for RTX 20xx).
+Open `https://unitedpuzzlepool.com`, log in, and generate a token from your dashboard.
 
-**`share`** — integer weight for keyspace splitting. The script divides the total range proportionally by share values. Use equal values (e.g. all `1`) for equal distribution across identical GPUs.
+**Option B — API:**
 
-> GPUs detected by `nvidia-smi` that have **no entry** in `gpu_index_map` default to `share: 1` and reuse the first configured binary automatically — they are never skipped.
+```bash
+curl -X POST https://unitedpuzzlepool.com/api/token/generate
+```
 
-**Example — 11 identical GPUs, equal split:**
+Verify it works:
+
+```bash
+curl -H "pool-token: YOUR_TOKEN" "https://unitedpuzzlepool.com/api/block?length=1T"
+```
+
+A successful response contains `range.start`, `range.end`, and `checkwork_addresses`.
+
+### GPU configuration (`gpu_index_map`)
+
+`gpu_index_map` tells the script which binary to use for each GPU and how to split the keyspace between them.
+
+**`alg_path`** — path to the binary for this GPU index. Allows different GPUs to use different builds when their CUDA Compute Capabilities differ.
+
+**`share`** — relative weight for keyspace splitting. The total range is divided proportionally. Use `1` for all GPUs to get equal splits.
+
+> **Important:** List every GPU detected by `nvidia-smi`. An unlisted GPU defaults to `share: 1`, which becomes a tiny fraction if other entries have large values like `65`/`35`, causing it to finish instantly while others run for hours.
+
+**Check your GPU indices:**
+
+```bash
+nvidia-smi --query-gpu=index,name --format=csv,noheader
+```
+
+**Example — identical GPUs, equal split:**
 
 ```json
 "gpu_index_map": {
     "0":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
     "1":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "2":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "3":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "4":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "5":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "6":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "7":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "8":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "9":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 },
-    "10": { "alg_path": "./bin/vanitysearch86-v3", "share": 1 }
+    "2":  { "alg_path": "./bin/vanitysearch86-v3", "share": 1 }
 }
 ```
 
-**Example — 2 GPUs with different hardware, proportional split:**
+**Example — mixed GPU hardware, weighted split:**
 
 ```json
 "gpu_index_map": {
@@ -94,111 +217,43 @@ The script is configured using the `settings.json` file. It is reloaded before e
 }
 ```
 
-> Make sure every detected GPU has an entry when using custom `share` values. An unlisted GPU defaults to `share: 1`, which becomes a tiny fraction if other GPUs have large share values (e.g. 65 + 35), causing them to finish near-instantly while the others work the full range.
-
 ---
 
-## Getting Your Pool Token (`user_token`)
+## Telegram Setup
 
-1. **Web UI** — open `http://localhost:3000`, click **Generate Token**, copy the value into `settings.json`.
+Telegram gives you a live status card per worker that is edited in place (no message spam).
 
-2. **API (CLI)**:
-    ```bash
-    curl -X POST http://localhost:3000/api/token/generate
-    ```
-    Optional — verify a block request with your token:
-    ```bash
-    curl -H "pool-token: YOUR_TOKEN" "http://localhost:3000/api/block?length=1T"
-    ```
-    The response includes `range.start`, `range.end`, and `checkwork_addresses`.
+### 1. Create a bot
 
----
+1. Open Telegram and search for `@BotFather`
+2. Send `/newbot` and follow the prompts
+3. Copy the token (looks like `123456789:ABCdefGHI...`)
+4. Paste it into `settings.json` → `telegram_accesstoken`
 
-## Execution
+### 2. Get your chat ID
 
-1. Configure `settings.json` (especially `api_url`, `user_token`, `worker_name`, and `gpu_index_map`).
-2. Place GPU binaries in `bin/`.
-3. Run:
-    ```bash
-    python3 script.py
-    ```
-4. Monitor log output and Telegram for real-time status.
+1. Search for `@userinfobot` on Telegram and send `/start`
+2. It replies with your ID number
+3. Paste it into `settings.json` → `telegram_chatid`
 
----
+### 3. Start the bot
 
-## Behavior
+Send any message to your bot on Telegram. The first time the script runs it will create the status message automatically.
 
-### Work Cycle
-
-1. **Fetch block** — calls the pool API to get a keyspace range and target addresses.
-2. **Write `in.txt`** — saves target addresses (including any `additional_addresses`).
-3. **Run binary** — launches one subprocess per GPU, each searching its assigned segment.
-4. **Process `out.txt`** — parses results after all GPU processes finish.
-    - **Target key found:** saves `addr:priv` to `KEYFOUND.txt`, notifies Telegram, and exits.
-    - **Normal keys found:** queued in `pending_keys.json` for batch posting.
-5. **Submit keys** — posts batches of 10–30 keys to `api_url/submit`. If fewer keys than required are queued and the previous run succeeded, the script generates valid filler keys within the current block range to complete the batch.
-    - If the API reports incompatible keys, the batch is retried up to **3 times** inside `post_private_keys`, then the queue is cleared and a new block is fetched.
-    - If posting fails **3 consecutive times** for any reason (network error, server error, incompatible), the pending queue is cleared automatically and the script moves on — it will never loop indefinitely waiting to post.
-
-### Multi-GPU Mode
-
-When `nvidia-smi` detects multiple GPUs the script automatically:
-
-- Splits the keyspace into N weighted segments (one per GPU).
-- Launches N subprocesses simultaneously, one per GPU.
-- Streams each GPU's output labeled `[GPU <id>]` in real time.
-- Writes per-GPU output to `out_gpu_<id>.txt` and merges into `out.txt` after all finish.
-- For VanitySearch-style binaries, injects `-gpuId <id>` per subprocess and strips any `-gpuId` from `program_arguments` to avoid conflicts.
-- If a GPU fails to start, all already-running sibling processes are cleanly terminated before the error is reported.
-
-### Single-GPU Mode
-
-To manually assign one GPU per process, set `CUDA_VISIBLE_DEVICES` before running:
-
-```bash
-CUDA_VISIBLE_DEVICES=0 python3 script.py
-```
-
-The script maps the visible device to index `0` for VanitySearch-style binaries automatically.
-
-### One-Shot Mode (`oneshot: true`)
-
-Runs exactly one complete cycle (fetch → crack → submit) then exits.
-
-### Loop Mode (default)
-
-Runs continuously until:
-- A key for an `additional_address` is found.
-- The API signals all blocks are solved (`409 — All blocks are solved`).
-- The user interrupts (`Ctrl+C`).
-
-### Smart API Handling
-
-- If `block_length` is too large for the remaining range, the API assigns a smaller block automatically.
-- On server errors (5xx), the script waits and retries without resetting state.
-- On repeated "no active block" errors (3 consecutive), pending keys are cleared and a fresh block is fetched.
-
----
-
-## Telegram Status
-
-A single Telegram message per worker is maintained and edited in place (no spam). Powered by `telegram_status.py` with state persisted in `telegram_state.json`.
-
-### Format
+### Status card format
 
 ```
-👷 Worker: worker_name
+👷 Worker: GPU-Rig-01
 
 📊 Status
 🧩 Session: 3f7f7e12
 ⏳ Active: 50 mins
-✅ Blocks: 1
-🔁 Consecutive: 1
+✅ Blocks: 12
+🔁 Consecutive: 12
 ⚙️ GPU: GPU#0 NVIDIA GeForce RTX 4090
          GPU#1 NVIDIA GeForce RTX 4090
-         ...
 🧠 Algorithm: vanitysearch86-v3
-🔧 Args: -gpu -g 1792,512
+🔧 Args: -
 🧭 Range: 4ef4c37aba1a635c0d:4ef4c383d268d5fc0d
 📫 Addresses: 11
 📦 Pending Keys: 0
@@ -206,19 +261,177 @@ A single Telegram message per worker is maintained and edited in place (no spam)
 ❗ Last Error: -
 🔑 Keyfound: -
 ⏱️ Next Fetch: 0s
-🧱 Total Length: 1.23G
+🧱 Total Length: 14.5T
 🕒 Updated 2025-12-12 04:32:18
 ```
 
-- GPU names are listed one per line (no commas) for multi-GPU setups.
-- `🧱 Total Length` accumulates keyspace across all successfully processed blocks in the session.
-- Rate limiting per error category prevents noisy repeated updates.
-- Falls back to plain text if Telegram rejects HTML formatting.
+---
+
+## Running the Miner
+
+### Foreground (interactive)
+
+```bash
+python3 script.py
+```
+
+Press `Ctrl+C` to stop. Output is shown directly in the terminal.
+
+### Background via `miner.sh` (recommended for VPS)
+
+```bash
+./miner.sh start      # launch in background
+./miner.sh status     # check if running and see PID
+./miner.sh logs       # tail live output — Ctrl+C exits without stopping the miner
+./miner.sh stop       # gracefully stop
+./miner.sh restart    # stop + start (use after editing settings.json)
+```
+
+All output is saved to `miner.log` in the project folder.
+
+---
+
+## Managing in the Background (VPS / SSH)
+
+When connecting via SSH you need the miner to keep running after you disconnect. `miner.sh` handles this with `nohup` and a PID file — no extra tools required.
+
+### First time setup
+
+```bash
+# SSH into your VPS
+ssh user@your-vps-ip
+
+# Go to the project folder
+cd ~/united-pool-gpu-script
+
+# Make the manager script executable
+chmod +x miner.sh
+
+# Start the miner
+./miner.sh start
+
+# Watch the output for a few seconds to confirm it is working
+./miner.sh logs
+# Press Ctrl+C to stop watching — the miner keeps running
+
+# Disconnect from SSH — miner continues in background
+exit
+```
+
+### Checking on it later
+
+```bash
+ssh user@your-vps-ip
+cd ~/united-pool-gpu-script
+
+./miner.sh status     # is it still running?
+./miner.sh logs       # see recent output
+```
+
+### Applying settings changes
+
+Edit `settings.json` then restart — no need to touch anything else:
+
+```bash
+nano settings.json
+./miner.sh restart
+```
+
+### Full workflow reference
+
+| Goal | Command |
+| :--- | :------ |
+| Start the miner | `./miner.sh start` |
+| Stop the miner | `./miner.sh stop` |
+| Restart after config change | `./miner.sh restart` |
+| Check if running | `./miner.sh status` |
+| Watch live output | `./miner.sh logs` |
+| Run in foreground (debug) | `python3 script.py` |
+
+---
+
+## How It Works
+
+### Work cycle (per block)
+
+1. **Fetch block** — requests a keyspace range and target addresses from the pool API
+2. **Write `in.txt`** — saves target addresses for the binary to search against
+3. **Run binary** — launches one subprocess per GPU; each searches its assigned keyspace segment in parallel
+4. **Process output** — parses results; if a target address key is found it is saved to `KEYFOUND.txt` and the script exits
+5. **Submit keys** — posts the found keys to the pool API; if fewer than required, generates valid filler keys within the block range to complete the batch
+
+### Multi-GPU behaviour
+
+- `nvidia-smi` detects all GPU indices automatically
+- Keyspace is split proportionally by `share` weights from `gpu_index_map`
+- Each GPU runs its own subprocess and writes to `out_gpu_<id>.txt`
+- All outputs are merged into `out.txt` after all GPUs finish
+- `-gpuId <id>` is injected per subprocess automatically for VanitySearch-style binaries
+- If any GPU fails to start, all already-running siblings are cleanly killed before the error is reported
+
+### Key submission
+
+- Keys from each block are kept isolated — no cross-block contamination
+- If the API rejects a batch as incompatible, it is retried up to 3 times then discarded
+- If posting fails 3 consecutive times for any reason, the queue is cleared and the script moves on
+- The script never loops indefinitely — stale keys are always discarded automatically
+
+---
+
+## Troubleshooting
+
+### `libcudart.so.12: cannot open shared object file`
+
+The CUDA runtime library is not on the dynamic linker path. Fix permanently:
+
+```bash
+echo "/usr/local/cuda-12.1/lib64" | sudo tee /etc/ld.so.conf.d/cuda-12-1.conf
+sudo ldconfig
+```
+
+Then restart the miner.
+
+### Miner exits immediately after `./miner.sh start`
+
+Check the log for the actual error:
+
+```bash
+./miner.sh logs
+```
+
+Common causes: missing `settings.json`, wrong `api_url`, binary not found in `bin/`.
+
+### All GPUs finish instantly, one takes very long
+
+Your `gpu_index_map` has unequal `share` values but not all GPU indices are listed. GPUs without an entry default to `share: 1`, which is a tiny fraction of the total when other GPUs have values like `65` or `35`.
+
+Fix: list every GPU index from `nvidia-smi` with equal shares:
+
+```bash
+nvidia-smi --query-gpu=index,name --format=csv,noheader
+```
+
+Then add each index to `gpu_index_map` with `"share": 1`.
+
+### API keeps returning incompatible private keys
+
+The script now automatically discards keys after 3 failed attempts and fetches a fresh block. If it happens repeatedly, verify:
+
+1. Your `program_name` in `settings.json` matches your actual binary (`vanitysearch-v3` for VanitySearch-V3, `bitcrack` for BitCrack)
+2. The binary is producing output in the expected format — run it manually once to check:
+   ```bash
+   ./bin/vanitysearch86-v3 -i in.txt -o test_out.txt --keyspace START:END -gpuId 0
+   cat test_out.txt
+   ```
+
+### `settings.json` changes not taking effect
+
+The script reloads `settings.json` before each block, not mid-block. If the GPU binary is running, wait for the current block to finish or use `./miner.sh restart`.
 
 ---
 
 ## Tool References
 
-- VanitySearch (official): https://github.com/JeanLucPons/VanitySearch
 - VanitySearch-V3 (keyspace support): https://github.com/Miskecy/VanitySearch-V3
+- VanitySearch (official): https://github.com/JeanLucPons/VanitySearch
 - BitCrack (official): https://github.com/brichard19/BitCrack
