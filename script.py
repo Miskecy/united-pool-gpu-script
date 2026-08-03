@@ -1009,7 +1009,7 @@ def post_private_keys(private_keys):
                     if cnt >= 3:
                         globals()["POST_ERROR_CONSECUTIVE"] = 0
                         try:
-                            PENDING_KEYS = []
+                            globals()["PENDING_KEYS"] = []
                             _save_pending_keys()
                         except Exception:
                             pass
@@ -1470,13 +1470,19 @@ def process_out_file():
             except Exception:
                 pass
         if keys_to_post:
-            PENDING_KEYS.extend(keys_to_post)
+            _existing = set(PENDING_KEYS)
+            _new = [k for k in keys_to_post if k not in _existing]
+            PENDING_KEYS.extend(_new)
             _save_pending_keys()
         update_status({"keyfound": f"{len(found_pairs)} saved to {KEYFOUND_FILE}", "pending_keys": len(PENDING_KEYS)})
         return True
-    
+
     if keys_to_post:
-        PENDING_KEYS.extend(keys_to_post)
+        _existing = set(PENDING_KEYS)
+        _new = [k for k in keys_to_post if k not in _existing]
+        if len(_new) < len(keys_to_post):
+            logger("Warning", f"Dropped {len(keys_to_post) - len(_new)} duplicate keys from output.")
+        PENDING_KEYS.extend(_new)
         logger("Info", f"Accumulated {len(PENDING_KEYS)} keys for posting.")
         _save_pending_keys()
         update_status({"pending_keys": len(PENDING_KEYS)})
@@ -1549,6 +1555,12 @@ if __name__ == "__main__":
                 update_status({"pending_keys": len(PENDING_KEYS), "next_fetch_in": 0})
                 logger("Info", "Incompatible keys detected and cleared. Fetching a new block immediately.")
                 continue
+            # Keys still here after flush belong to the previous block and could not be posted.
+            # Mixing them with the next block's keys causes incompatible errors — discard them.
+            if PENDING_KEYS:
+                logger("Warning", f"Discarding {len(PENDING_KEYS)} unposted keys from previous block to prevent cross-block contamination.")
+                globals()["PENDING_KEYS"] = []
+                _save_pending_keys()
             if ONE_SHOT and PROCESSED_ONE_BLOCK:
                 logger("Info", "One-shot mode enabled. Exiting after first block.")
                 break
