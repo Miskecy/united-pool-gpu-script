@@ -462,7 +462,7 @@ def notify_error(category, message, api_offline=False, sleep_seconds=0, rate_lim
         except Exception:
             pass
         try:
-            PENDING_KEYS = []
+            globals()["PENDING_KEYS"] = []
             _save_pending_keys()
         except Exception:
             pass
@@ -555,6 +555,7 @@ def flush_pending_keys_blocking():
     global PENDING_KEYS, NEED_NEW_BLOCK_FETCH
     posted = False
     required = max(10, min(30, int(CURRENT_ADDR_COUNT or 10)))
+    fail_count = 0
     while len(PENDING_KEYS) >= required:
         batch = PENDING_KEYS[:required]
         _res = post_private_keys(batch)
@@ -563,18 +564,21 @@ def flush_pending_keys_blocking():
         if _ok:
             PENDING_KEYS = PENDING_KEYS[required:]
             posted = True
+            fail_count = 0
             _save_pending_keys()
         else:
-            if _incomp:
+            fail_count += 1
+            if _incomp or fail_count >= 3:
+                if not _incomp:
+                    logger("Warning", f"Post failed {fail_count} consecutive times. Clearing pending keys and moving on.")
                 PENDING_KEYS = []
                 _save_pending_keys()
                 NEED_NEW_BLOCK_FETCH = True
                 break
-            else:
-                _save_pending_keys()
-                if 'NEED_NEW_BLOCK_FETCH' in globals() and NEED_NEW_BLOCK_FETCH:
-                    break
-                time.sleep(30)
+            _save_pending_keys()
+            if NEED_NEW_BLOCK_FETCH:
+                break
+            time.sleep(30)
     # Try a final post with fillers if we have some keys but fewer than required
     if not posted and LAST_RUN_OK and 0 < len(PENDING_KEYS) < required and CURRENT_RANGE_START and CURRENT_RANGE_END:
         fillers = _generate_filler_keys(required - len(PENDING_KEYS), CURRENT_RANGE_START, CURRENT_RANGE_END, exclude=PENDING_KEYS)
@@ -1641,7 +1645,7 @@ if __name__ == "__main__":
             except Exception:
                 pass
             try:
-                PENDING_KEYS = []
+                globals()["PENDING_KEYS"] = []
                 _save_pending_keys()
             except Exception:
                 pass
