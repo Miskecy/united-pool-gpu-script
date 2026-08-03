@@ -229,6 +229,7 @@ def _get_program_path_for_gpu(gpu_id, gpu_details):
     """
     Resolves the correct program path for a given GPU.
     Uses GPU_INDEX_MAP (per-index) and falls back to APP_PATH.
+    If neither is set for this GPU, falls back to the first valid path in GPU_INDEX_MAP.
     """
     if GPU_INDEX_MAP:
         try:
@@ -244,6 +245,16 @@ def _get_program_path_for_gpu(gpu_id, gpu_details):
                 path = mapped
             if path:
                 return _resolve_path(path)
+        # No mapping for this GPU — fall back to any configured path in the map
+        if not APP_PATH:
+            for v in GPU_INDEX_MAP.values():
+                p = None
+                if isinstance(v, dict):
+                    p = v.get("alg_path") or v.get("path")
+                else:
+                    p = v
+                if p:
+                    return _resolve_path(p)
     return APP_PATH
 
 def _detect_gpu_label():
@@ -1243,11 +1254,21 @@ def run_external_program(start_hex, end_hex):
                 threads.append(t)
             except FileNotFoundError:
                 logger("Error", "External program not found. Check path and permissions.")
+                for _p in procs:
+                    try:
+                        _p.kill()
+                    except Exception:
+                        pass
                 update_status_rl({"last_error": "Program not found"}, "program_not_found", 120)
                 notify_error("program_not_found", "Program not found", api_offline=False, sleep_seconds=0, rate_limit=120)
                 return False
             except Exception as e:
                 logger("Error", f"Exception while starting GPU {gid}: {e}")
+                for _p in procs:
+                    try:
+                        _p.kill()
+                    except Exception:
+                        pass
                 update_status_rl({"last_error": f"Program start exception `{type(e).__name__}`"}, "program_exception", 120)
                 notify_error("program_exception", f"Program start exception `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
                 return False
