@@ -1077,6 +1077,15 @@ def clean_out_file():
 
 # ----------------------------------------------------------------------------------------------
 
+def _ensure_executable(path):
+    try:
+        if path and os.path.isfile(path):
+            import stat
+            current = os.stat(path).st_mode
+            os.chmod(path, current | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    except Exception:
+        pass
+
 def _gpu_out_path(i):
     return f"out_gpu_{i}.txt"
 
@@ -1244,6 +1253,7 @@ def run_external_program(start_hex, end_hex):
             args += ["-i", IN_FILE, "-o", outp, "--keyspace", f"{segments[idx][0]}:{segments[idx][1]}"]
             if "vanity" in kind:
                 args += ["-gpuId", str(gid)]
+            _ensure_executable(this_app_path)
             try:
                 p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 procs.append(p)
@@ -1317,8 +1327,9 @@ def run_external_program(start_hex, end_hex):
         selected_gpu = 0
     
     this_app_path = _get_program_path_for_gpu(selected_gpu, gpu_details)
+    _ensure_executable(this_app_path)
     base = [this_app_path]
-    
+
     if isinstance(APP_ARGS, str) and APP_ARGS.strip():
         base += shlex.split(APP_ARGS)
     if ("vanity" in kind) and not re.search(r"-gpuId\s+\d+", " ".join(base)):

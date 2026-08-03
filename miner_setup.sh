@@ -104,6 +104,18 @@ EOF
     export CUDA_HOME="$CUDA_HOME_PATH"
     export PATH="$CUDA_HOME/bin:$PATH"
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+
+    # Register libs with the system linker so any session can find libcudart
+    CUDA_LDCONF="/etc/ld.so.conf.d/cuda-12-1.conf"
+    if [ ! -f "$CUDA_LDCONF" ]; then
+        echo "$CUDA_HOME_PATH/lib64" | sudo tee "$CUDA_LDCONF" > /dev/null \
+            && sudo ldconfig \
+            && ok "CUDA libs registered with ldconfig" \
+            || warn "ldconfig registration failed — set LD_LIBRARY_PATH manually before running script.py"
+    else
+        ok "CUDA ldconfig entry already present"
+        sudo ldconfig 2>/dev/null || true
+    fi
 else
     warn "CUDA dir $CUDA_HOME_PATH not found — skipping env config"
 fi
