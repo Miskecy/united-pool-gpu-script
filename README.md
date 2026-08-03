@@ -137,7 +137,8 @@ The script is configured using the `settings.json` file. It is reloaded before e
     - **Target key found:** saves `addr:priv` to `KEYFOUND.txt`, notifies Telegram, and exits.
     - **Normal keys found:** queued in `pending_keys.json` for batch posting.
 5. **Submit keys** — posts batches of 10–30 keys to `api_url/submit`. If fewer keys than required are queued and the previous run succeeded, the script generates valid filler keys within the current block range to complete the batch.
-    - If the API reports incompatible keys, the batch is retried up to **3 times**, then the queue is cleared and a new block is fetched.
+    - If the API reports incompatible keys, the batch is retried up to **3 times** inside `post_private_keys`, then the queue is cleared and a new block is fetched.
+    - If posting fails **3 consecutive times** for any reason (network error, server error, incompatible), the pending queue is cleared automatically and the script moves on — it will never loop indefinitely waiting to post.
 
 ### Multi-GPU Mode
 
