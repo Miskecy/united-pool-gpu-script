@@ -431,8 +431,23 @@ STATUS = {
     "keyfound": "-",
     "all_blocks_solved": False,
     "next_fetch_in": 0,
+    "speed": None,
     "updated_at": "",
 }
+
+_SPEED_WRITE_TS = 0.0
+
+
+def _ingest_speed(value, unit):
+    """Parse a speed reading into Mkeys/s and throttle-write to status.json."""
+    global _SPEED_WRITE_TS
+    u = (unit or "M").upper()
+    mk = value * 1000 if u == "G" else value / 1000 if u == "K" else value
+    STATUS["speed"] = round(mk, 2)
+    now = time.time()
+    if now - _SPEED_WRITE_TS >= 2.0:
+        _SPEED_WRITE_TS = now
+        _write_status_file()
 
 ERROR_COUNTS = {}
 
@@ -1375,11 +1390,17 @@ def run_external_program(start_hex, end_hex):
             env=env,
         ) as process:
             last_dyn_len = 0
-            progress_re = re.compile(r"^\s*\[\s*\d+(?:\.\d+)?\s*[GMK]?keys/s\].*", re.IGNORECASE)
+            progress_re = re.compile(r"^\s*\[\s*(\d+(?:\.\d+)?)\s*([GMK])?keys/s\].*", re.IGNORECASE)
             for raw in process.stdout:
                 msg = raw.rstrip("\n")
                 txt = msg.strip()
-                if progress_re.match(txt):
+                m_prog = progress_re.match(txt)
+                if m_prog:
+                    try:
+                        _ingest_speed(float(m_prog.group(1)), m_prog.group(2))
+                    except Exception:
+                        pass
+                if m_prog:
                     display = f"{Fore.CYAN}  > {txt}{Style.RESET_ALL}"
                     pad = max(0, last_dyn_len - len(display))
                     sys.stdout.write("\r" + display + (" " * pad))

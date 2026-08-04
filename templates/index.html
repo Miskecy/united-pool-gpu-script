@@ -276,7 +276,7 @@ main { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
   <div class="spacer"></div>
 
   <!-- Telegram -->
-  <button id="tg-toggle" class="hbtn tg" onclick="toggleTelegram()" title="Toggle Telegram notifications">📡 Telegram: <span id="tg-state">…</span></button>
+  <button id="tg-toggle" class="hbtn tg" onclick="toggleTelegram()">📡 <span id="tg-state">Telegram …</span></button>
 
   <!-- Miner controls (only script.py, dashboard stays up) -->
   <div class="btn-group">
@@ -427,75 +427,12 @@ function renderLogLine(raw) {
   );
 }
 
-// ── Average speed tracking ───────────────────────────────────────
-// Supports per-GPU lines: "GPU#0: 1234.5 Mkeys/s" and generic: "1234.5 Mkeys/s"
-// Also: "Speed: 1234.5 Mkeys/s", "Throughput: 1234.5 MK/s"
-const SPEED_RE_GPU  = /GPU\s*#?(\d+)[^:]*?:\s*.*?(\d[\d,]*\.?\d*)\s*(G|M|K)?keys?\/s/i;
-const SPEED_RE_GEN  = /(?:speed|throughput|rate)?[:\s]*(\d[\d,]*\.?\d*)\s*(G|M|K)?keys?\/s/i;
-
-const speedBuffers = {}; // { gpuKey: [readings...] }, gpuKey = '0','1',... or 'global'
-const SPEED_BUF_SIZE = 20;
-
-function parseSpeedMk(value, unit) {
-  const v = parseFloat(String(value).replace(/,/g, ''));
-  if (isNaN(v)) return null;
-  const u = (unit || 'M').toUpperCase();
-  if (u === 'G') return v * 1000;
-  if (u === 'K') return v / 1000;
-  return v; // M default
-}
-
-function ingestSpeedLine(raw) {
-  const clean = stripAnsi(raw);
-
-  // Try per-GPU first
-  const mg = clean.match(SPEED_RE_GPU);
-  if (mg) {
-    const key = mg[1];
-    const mk = parseSpeedMk(mg[2], mg[3]);
-    if (mk !== null) {
-      if (!speedBuffers[key]) speedBuffers[key] = [];
-      speedBuffers[key].push(mk);
-      if (speedBuffers[key].length > SPEED_BUF_SIZE) speedBuffers[key].shift();
-    }
-    return;
-  }
-
-  // Generic speed line
-  const gg = clean.match(SPEED_RE_GEN);
-  if (gg) {
-    const mk = parseSpeedMk(gg[1], gg[2]);
-    if (mk !== null) {
-      if (!speedBuffers['global']) speedBuffers['global'] = [];
-      speedBuffers['global'].push(mk);
-      if (speedBuffers['global'].length > SPEED_BUF_SIZE) speedBuffers['global'].shift();
-    }
-  }
-}
-
-function computeAvgSpeed() {
-  const keys = Object.keys(speedBuffers);
-  if (!keys.length) return null;
-
-  let total = 0;
-  for (const k of keys) {
-    const buf = speedBuffers[k];
-    if (!buf.length) continue;
-    total += buf.reduce((a, b) => a + b, 0) / buf.length;
-  }
-  return total;
-}
-
+// ── Speed formatting ─────────────────────────────────────────────
 function fmtSpeed(mk) {
-  if (mk === null || mk === undefined) return '—';
+  if (mk === null || mk === undefined) return null;
   if (mk >= 1000) return (mk / 1000).toFixed(2) + ' Gkeys/s';
   if (mk < 1)    return (mk * 1000).toFixed(0) + ' Kkeys/s';
   return mk.toFixed(2) + ' Mkeys/s';
-}
-
-function clearSpeedBuffers() {
-  for (const k of Object.keys(speedBuffers)) delete speedBuffers[k];
-  document.getElementById('s-speed').textContent = '—';
 }
 
 // ── Log viewer ───────────────────────────────────────────────────
@@ -515,14 +452,6 @@ function appendLine(raw) {
   logBody.appendChild(el);
   while (logBody.children.length > 2000) logBody.removeChild(logBody.firstChild);
   if (asChk.checked) logBody.scrollTop = logBody.scrollHeight;
-
-  // Parse speed from this line
-  ingestSpeedLine(raw);
-  const avg = computeAvgSpeed();
-  if (avg !== null) {
-    const el2 = document.getElementById('s-speed');
-    if (el2) el2.textContent = fmtSpeed(avg);
-  }
 }
 
 function clearLog() { logBody.innerHTML = ''; }
@@ -646,8 +575,6 @@ function fmtTime(iso) {
 function set(id, html)  { const el = document.getElementById(id); if (el) el.innerHTML  = html; }
 function setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
 
-let prevRunning = null;
-
 function applyStatus(d) {
   const badge = document.getElementById('badge');
   if (d.miner_running) {
@@ -658,10 +585,7 @@ function applyStatus(d) {
     badge.className = 'badge stopped';
     document.getElementById('badge-txt').textContent = 'STOPPED';
     document.getElementById('pid-lbl').textContent = '';
-    // Clear speed buffers when miner stops
-    if (prevRunning === true) clearSpeedBuffers();
   }
-  prevRunning = d.miner_running;
 
   // Keyspace
   const range = fmt(d.range);
@@ -701,7 +625,7 @@ function applyStatus(d) {
   foundEl.textContent = found;
 
   const next = parseInt(d.next_fetch_in) || 0;
-  setText('c-next', next > 0 ? `${next}s` : '—');
+  setText('c-next', next > 0 ? `${next}s` : (d.miner_running ? 'Running' : '—'));
 
   set('c-gpu', renderGPUs(d.gpu));
 
@@ -710,11 +634,13 @@ function applyStatus(d) {
   // Graceful stop state (from server)
   if (d.graceful_stop_pending !== undefined) applyGracefulState(d.graceful_stop_pending);
 
-  // Session bar (don't overwrite live speed — managed by SSE)
+  // Session bar
   setText('s-up',      fmtUptime(d.session_started_ts));
   setText('s-blocks',  d.session_blocks  ?? '0');
   setText('s-consec',  d.session_consecutive ?? '0');
   setText('s-ks',      fmtKS(d.session_keyspace_total));
+  const speedEl = document.getElementById('s-speed');
+  if (speedEl) speedEl.textContent = fmtSpeed(d.speed) || (d.miner_running ? 'Measuring…' : '—');
   setText('s-worker',  fmt(d.worker));
   setText('s-algo',    fmt(d.algorithm));
   setText('s-updated', fmtTime(d.updated_at));
@@ -734,8 +660,15 @@ function applyTelegramToggle(enabled) {
   const btn   = document.getElementById('tg-toggle');
   const state = document.getElementById('tg-state');
   if (!btn || !state) return;
-  state.textContent = enabled ? 'ON' : 'OFF';
-  btn.className = `hbtn tg ${enabled ? 'on' : 'off'}`;
+  if (enabled) {
+    state.textContent = 'Telegram ON · Disable';
+    btn.className = 'hbtn tg on';
+    btn.title = 'Telegram notifications enabled — click to disable';
+  } else {
+    state.textContent = 'Telegram OFF · Enable';
+    btn.className = 'hbtn tg off';
+    btn.title = 'Telegram notifications disabled — click to enable';
+  }
 }
 
 async function toggleTelegram() {
