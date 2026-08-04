@@ -3,8 +3,8 @@
 
 REPO_URL="https://github.com/Miskecy/united-pool-gpu-script.git"
 REPO_DIR="$HOME/united-pool-gpu-script"
-CUDA_VERSION="12-1"
-CUDA_HOME_PATH="/usr/local/cuda-12.1"
+CUDA_VERSION="12-8"
+CUDA_HOME_PATH="/usr/local/cuda-12.8"
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -68,28 +68,28 @@ else
     ok "CUDA repository already present"
 fi
 
-# ─── 4. CUDA 12.1 ────────────────────────────────────────────────────────────
+# ─── 4. CUDA 12.8 ────────────────────────────────────────────────────────────
 
-section "4. CUDA 12.1 (compiler + runtime)"
-if command -v nvcc &>/dev/null && nvcc --version 2>/dev/null | grep -q "12\.1"; then
-    ok "CUDA 12.1 already installed"
+section "4. CUDA 12.8 (compiler + runtime)"
+if command -v nvcc &>/dev/null && nvcc --version 2>/dev/null | grep -q "12\.8"; then
+    ok "CUDA 12.8 already installed"
 else
     sudo apt-get install -y \
         cuda-compiler-${CUDA_VERSION} \
         cuda-libraries-${CUDA_VERSION} \
         cuda-runtime-${CUDA_VERSION} \
-        && ok "CUDA 12.1 installed" \
-        || warn "CUDA 12.1 install failed — GPU mining binaries may not work"
+        && ok "CUDA 12.8 installed" \
+        || warn "CUDA 12.8 install failed — GPU mining binaries may not work"
 fi
 
 # ─── 5. CUDA environment variables ───────────────────────────────────────────
 
 section "5. CUDA environment variables"
 if [ -d "$CUDA_HOME_PATH" ]; then
-    MARKER="# ==== CUDA 12.1 CONFIG (united-pool-gpu-script) ===="
+    MARKER="# ==== CUDA 12.8 CONFIG (united-pool-gpu-script) ===="
     if ! grep -qF "$MARKER" ~/.bashrc 2>/dev/null; then
-        # Remove any stale CUDA entries first
-        sed -i '/CUDA 12\|cuda-12\|CUDA 13\|cuda-13/d' ~/.bashrc 2>/dev/null || true
+        # Remove any stale CUDA entries from previous versions (12.1, 12.x, etc.)
+        sed -i '/CUDA 12\|cuda-12\|CUDA 13\|cuda-13\|CUDA 12\.1 CONFIG/d' ~/.bashrc 2>/dev/null || true
         cat >> ~/.bashrc <<EOF
 
 $MARKER
@@ -106,7 +106,9 @@ EOF
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
     # Register libs with the system linker so any session can find libcudart
-    CUDA_LDCONF="/etc/ld.so.conf.d/cuda-12-1.conf"
+    CUDA_LDCONF="/etc/ld.so.conf.d/cuda-12-8.conf"
+    # Remove stale conf from older CUDA version if present
+    [ -f /etc/ld.so.conf.d/cuda-12-1.conf ] && sudo rm -f /etc/ld.so.conf.d/cuda-12-1.conf 2>/dev/null || true
     if [ ! -f "$CUDA_LDCONF" ]; then
         echo "$CUDA_HOME_PATH/lib64" | sudo tee "$CUDA_LDCONF" > /dev/null \
             && sudo ldconfig \
@@ -147,6 +149,8 @@ python3 -m pip install --upgrade pip -q 2>/dev/null || warn "pip upgrade failed"
 PYTHON_PKGS=(
     requests      # HTTP calls to pool API and Telegram
     colorama      # Colored terminal output
+    flask         # Web dashboard (dashboard.py)
+    werkzeug      # Flask dependency — HTTP utilities
 )
 
 for pkg in "${PYTHON_PKGS[@]%%#*}"; do   # strip inline comments
@@ -201,6 +205,11 @@ else
     done
 fi
 echo ""
-echo "Run the miner with:"
-echo "  cd $REPO_DIR && python3 script.py"
+echo "Run the miner:"
+echo "  cd $REPO_DIR"
+echo "  bash miner.sh start          # background process"
+echo ""
+echo "Run the web dashboard:"
+echo "  python3 dashboard.py         # access at http://YOUR_IP:8080"
+echo "  (optional) add \"dashboard_password\" to settings.json to require login"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

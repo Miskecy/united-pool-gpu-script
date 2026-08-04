@@ -1,12 +1,15 @@
 #!/bin/bash
-# miner.sh — manage script.py as a background process
-# Usage: ./miner.sh {start|stop|restart|status|logs}
+# miner.sh — manage script.py and dashboard.py as background processes
+# Usage: ./miner.sh {start|stop|restart|status|logs|dlogs}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON="python3"
 MAIN="$SCRIPT_DIR/script.py"
+DASHBOARD="$SCRIPT_DIR/dashboard.py"
 PID_FILE="$SCRIPT_DIR/.miner.pid"
+DASHBOARD_PID_FILE="$SCRIPT_DIR/.dashboard.pid"
 LOG_FILE="$SCRIPT_DIR/miner.log"
+DASHBOARD_LOG_FILE="$SCRIPT_DIR/dashboard.log"
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -18,86 +21,170 @@ _pid_running() {
 }
 
 _read_pid() {
-    [[ -f "$PID_FILE" ]] && cat "$PID_FILE" 2>/dev/null || echo ""
+    [[ -f "$1" ]] && cat "$1" 2>/dev/null || echo ""
 }
 
-# ─── commands ────────────────────────────────────────────────────────────────
+# ─── miner ───────────────────────────────────────────────────────────────────
 
-cmd_status() {
+_start_miner() {
     local pid
-    pid=$(_read_pid)
+    pid=$(_read_pid "$PID_FILE")
     if _pid_running "$pid"; then
-        echo -e "${GREEN}[RUNNING]${NC} script.py — PID $pid"
-        echo -e "  Log : $LOG_FILE"
-        echo -e "  Uptime: $(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
-    else
-        echo -e "${RED}[STOPPED]${NC} script.py is not running."
-        [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
-    fi
-}
-
-cmd_start() {
-    local pid
-    pid=$(_read_pid)
-    if _pid_running "$pid"; then
-        echo -e "${YELLOW}[WARN]${NC} Already running — PID $pid. Use 'restart' to reload."
+        echo -e "${YELLOW}  [MINER]${NC} Already running — PID $pid. Use 'restart' to reload."
         return 1
     fi
-
-    echo -e "${CYAN}[START]${NC} Launching script.py in background..."
     nohup "$PYTHON" -u "$MAIN" >> "$LOG_FILE" 2>&1 &
     pid=$!
     echo "$pid" > "$PID_FILE"
-
     sleep 1
     if _pid_running "$pid"; then
-        echo -e "${GREEN}[OK]${NC} Started — PID $pid"
-        echo -e "  Log : tail -f $LOG_FILE"
+        echo -e "${GREEN}  [MINER]${NC} Started — PID $pid"
+        echo -e "          Log : tail -f $LOG_FILE"
     else
-        echo -e "${RED}[FAIL]${NC} Process exited immediately. Check the log:"
+        echo -e "${RED}  [MINER]${NC} Process exited immediately. Check the log:"
         tail -20 "$LOG_FILE"
         rm -f "$PID_FILE"
         return 1
     fi
 }
 
-cmd_stop() {
-    local pid
-    pid=$(_read_pid)
+_stop_miner() {
+    local pid waited=0
+    pid=$(_read_pid "$PID_FILE")
     if ! _pid_running "$pid"; then
-        echo -e "${YELLOW}[WARN]${NC} Not running."
+        echo -e "${YELLOW}  [MINER]${NC} Not running."
         rm -f "$PID_FILE"
         return 0
     fi
-
-    echo -e "${CYAN}[STOP]${NC} Stopping PID $pid..."
+    echo -e "${CYAN}  [MINER]${NC} Stopping PID $pid..."
     kill "$pid" 2>/dev/null
-
-    local waited=0
-    while _pid_running "$pid" && (( waited < 10 )); do
-        sleep 1
-        (( waited++ ))
-    done
-
+    while _pid_running "$pid" && (( waited < 10 )); do sleep 1; (( waited++ )); done
     if _pid_running "$pid"; then
-        echo -e "${YELLOW}[WARN]${NC} Process did not exit cleanly — sending SIGKILL..."
+        echo -e "${YELLOW}  [MINER]${NC} Did not exit cleanly — sending SIGKILL..."
         kill -9 "$pid" 2>/dev/null
     fi
-
     rm -f "$PID_FILE"
-    echo -e "${GREEN}[OK]${NC} Stopped."
+    echo -e "${GREEN}  [MINER]${NC} Stopped."
+}
+
+_status_miner() {
+    local pid
+    pid=$(_read_pid "$PID_FILE")
+    if _pid_running "$pid"; then
+        echo -e "${GREEN}  [MINER]${NC} RUNNING — PID $pid  uptime: $(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+    else
+        echo -e "${RED}  [MINER]${NC} STOPPED"
+        [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
+    fi
+}
+
+# ─── dashboard ───────────────────────────────────────────────────────────────
+
+_start_dashboard() {
+    local pid
+    pid=$(_read_pid "$DASHBOARD_PID_FILE")
+    if _pid_running "$pid"; then
+        echo -e "${YELLOW}  [DASH]${NC}  Already running — PID $pid."
+        return 1
+    fi
+    if [ ! -f "$DASHBOARD" ]; then
+        echo -e "${YELLOW}  [DASH]${NC}  dashboard.py not found — skipping."
+        return 1
+    fi
+    nohup "$PYTHON" -u "$DASHBOARD" >> "$DASHBOARD_LOG_FILE" 2>&1 &
+    pid=$!
+    echo "$pid" > "$DASHBOARD_PID_FILE"
+    sleep 1
+    if _pid_running "$pid"; then
+        echo -e "${GREEN}  [DASH]${NC}  Started — PID $pid"
+        echo -e "          Log : tail -f $DASHBOARD_LOG_FILE"
+    else
+        echo -e "${RED}  [DASH]${NC}  Dashboard exited immediately. Check the log:"
+        tail -10 "$DASHBOARD_LOG_FILE"
+        rm -f "$DASHBOARD_PID_FILE"
+        return 1
+    fi
+}
+
+_stop_dashboard() {
+    local pid waited=0
+    pid=$(_read_pid "$DASHBOARD_PID_FILE")
+    if ! _pid_running "$pid"; then
+        echo -e "${YELLOW}  [DASH]${NC}  Not running."
+        rm -f "$DASHBOARD_PID_FILE"
+        return 0
+    fi
+    echo -e "${CYAN}  [DASH]${NC}  Stopping PID $pid..."
+    kill "$pid" 2>/dev/null
+    while _pid_running "$pid" && (( waited < 10 )); do sleep 1; (( waited++ )); done
+    if _pid_running "$pid"; then kill -9 "$pid" 2>/dev/null; fi
+    rm -f "$DASHBOARD_PID_FILE"
+    echo -e "${GREEN}  [DASH]${NC}  Stopped."
+}
+
+_status_dashboard() {
+    local pid
+    pid=$(_read_pid "$DASHBOARD_PID_FILE")
+    if _pid_running "$pid"; then
+        echo -e "${GREEN}  [DASH]${NC}  RUNNING — PID $pid  uptime: $(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+    else
+        echo -e "${RED}  [DASH]${NC}  STOPPED"
+        [[ -f "$DASHBOARD_PID_FILE" ]] && rm -f "$DASHBOARD_PID_FILE"
+    fi
+}
+
+# ─── commands ────────────────────────────────────────────────────────────────
+
+cmd_start() {
+    echo -e "${CYAN}[START]${NC} Launching miner + dashboard..."
+    _start_miner
+    _start_dashboard
+}
+
+cmd_stop() {
+    echo -e "${CYAN}[STOP]${NC} Stopping miner + dashboard..."
+    _stop_miner
+    _stop_dashboard
 }
 
 cmd_restart() {
-    echo -e "${CYAN}[RESTART]${NC} Restarting..."
-    cmd_stop
+    echo -e "${CYAN}[RESTART]${NC} Restarting miner + dashboard..."
+    _stop_miner
+    _stop_dashboard
     sleep 1
-    cmd_start
+    _start_miner
+    _start_dashboard
+}
+
+# ─── miner-only commands (dashboard keeps running) ───────────────
+
+cmd_start_miner() {
+    echo -e "${CYAN}[START-MINER]${NC} Launching miner only..."
+    _start_miner
+}
+
+cmd_stop_miner() {
+    echo -e "${CYAN}[STOP-MINER]${NC} Stopping miner only..."
+    _stop_miner
+}
+
+cmd_restart_miner() {
+    echo -e "${CYAN}[RESTART-MINER]${NC} Restarting miner only..."
+    _stop_miner
+    sleep 1
+    _start_miner
+}
+
+cmd_status() {
+    echo -e "\n${CYAN}── Status ───────────────────────────────${NC}"
+    _status_miner
+    _status_dashboard
+    echo ""
 }
 
 cmd_logs() {
     if [[ ! -f "$LOG_FILE" ]]; then
-        echo -e "${YELLOW}[WARN]${NC} No log file yet at $LOG_FILE"
+        echo -e "${YELLOW}[WARN]${NC} No miner log yet at $LOG_FILE"
         return 1
     fi
     echo -e "${CYAN}[LOGS]${NC} Tailing $LOG_FILE — press Ctrl+C to exit"
@@ -105,22 +192,40 @@ cmd_logs() {
     tail -n 50 -f "$LOG_FILE"
 }
 
+cmd_dlogs() {
+    if [[ ! -f "$DASHBOARD_LOG_FILE" ]]; then
+        echo -e "${YELLOW}[WARN]${NC} No dashboard log yet at $DASHBOARD_LOG_FILE"
+        return 1
+    fi
+    echo -e "${CYAN}[DASH LOGS]${NC} Tailing $DASHBOARD_LOG_FILE — press Ctrl+C to exit"
+    echo "────────────────────────────────────────"
+    tail -n 50 -f "$DASHBOARD_LOG_FILE"
+}
+
 # ─── dispatch ────────────────────────────────────────────────────────────────
 
 case "${1:-}" in
-    start)   cmd_start   ;;
-    stop)    cmd_stop    ;;
-    restart) cmd_restart ;;
-    status)  cmd_status  ;;
-    logs)    cmd_logs    ;;
+    start)          cmd_start         ;;
+    stop)           cmd_stop          ;;
+    restart)        cmd_restart       ;;
+    status)         cmd_status        ;;
+    logs)           cmd_logs          ;;
+    dlogs)          cmd_dlogs         ;;
+    start-miner)    cmd_start_miner   ;;
+    stop-miner)     cmd_stop_miner    ;;
+    restart-miner)  cmd_restart_miner ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status|logs}"
+        echo "Usage: $0 {start|stop|restart|status|logs|dlogs|start-miner|stop-miner|restart-miner}"
         echo ""
-        echo "  start    — launch script.py in the background"
-        echo "  stop     — gracefully stop the running process"
-        echo "  restart  — stop then start"
-        echo "  status   — show whether it is running and its PID"
-        echo "  logs     — tail the live log output (Ctrl+C to exit)"
+        echo "  start          — launch miner + dashboard in background"
+        echo "  stop           — stop miner + dashboard"
+        echo "  restart        — stop then start both"
+        echo "  status         — show running state and PIDs for both"
+        echo "  logs           — tail live miner output (Ctrl+C exits)"
+        echo "  dlogs          — tail live dashboard output (Ctrl+C exits)"
+        echo "  start-miner    — start miner only (dashboard keeps running)"
+        echo "  stop-miner     — stop miner only (dashboard keeps running)"
+        echo "  restart-miner  — restart miner only (dashboard keeps running)"
         exit 1
         ;;
 esac

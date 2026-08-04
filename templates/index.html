@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⚡ GPU Miner Dashboard</title>
+<style>
+:root {
+  --bg:      #0d1117;
+  --surface: #161b22;
+  --border:  #30363d;
+  --text:    #e6edf3;
+  --muted:   #8b949e;
+  --green:   #3fb950;
+  --blue:    #58a6ff;
+  --yellow:  #d29922;
+  --red:     #f85149;
+  --purple:  #d2a8ff;
+  --cyan:    #39c5cf;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Consolas', 'Menlo', 'Courier New', monospace;
+  font-size: 14px;
+  min-height: 100vh;
+}
+
+/* ── Header ───────────────────────────────────────────────────── */
+header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+  flex-wrap: wrap;
+}
+.brand { font-size: 17px; font-weight: 700; white-space: nowrap; }
+.brand .accent { color: var(--cyan); }
+
+.badge {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.badge.running { background: rgba(63,185,80,.12); color: var(--green); border-color: rgba(63,185,80,.3); }
+.badge.stopped { background: rgba(248,81,73,.12); color: var(--red);   border-color: rgba(248,81,73,.3); }
+.badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.badge.running .dot { animation: blink 1.6s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+.pid-label { font-size: 11px; color: var(--muted); }
+.spacer { flex: 1; }
+
+/* button group separators */
+.btn-group {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.02);
+}
+.btn-group-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 1px;
+  color: var(--muted); text-transform: uppercase;
+  padding: 0 4px 0 2px;
+  border-right: 1px solid var(--border);
+  margin-right: 2px;
+  white-space: nowrap;
+}
+.btn-group.emergency {
+  border-color: rgba(248,81,73,.25);
+  background: rgba(248,81,73,.04);
+}
+
+.hbtn {
+  padding: 5px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: transparent;
+  cursor: pointer; font-size: 12px; font-family: inherit;
+  transition: all .15s; white-space: nowrap;
+  color: var(--muted);
+}
+.hbtn:hover { background: rgba(255,255,255,.05); border-color: var(--muted); color: var(--text); }
+.hbtn.g { color: var(--green); border-color: rgba(63,185,80,.35); }
+.hbtn.g:hover { background: rgba(63,185,80,.1); }
+.hbtn.y { color: var(--yellow); border-color: rgba(210,153,34,.35); }
+.hbtn.y:hover { background: rgba(210,153,34,.1); }
+.hbtn.r { color: var(--red); border-color: rgba(248,81,73,.35); }
+.hbtn.r:hover { background: rgba(248,81,73,.1); }
+.hbtn.r-solid { color: #fff; background: rgba(248,81,73,.75); border-color: rgba(248,81,73,.8); font-weight: 700; }
+.hbtn.r-solid:hover { background: var(--red); }
+.hbtn.tg      { font-size: 11px; color: var(--muted); border-color: var(--border); }
+.hbtn.tg.on   { color: var(--blue);  border-color: rgba(88,166,255,.4); }
+.hbtn.tg.on:hover  { background: rgba(88,166,255,.08); }
+.hbtn.tg.off  { color: var(--muted); }
+.hbtn.tg.off:hover { background: rgba(255,255,255,.04); }
+/* graceful stop button: normal vs pending */
+.hbtn.grace         { color: var(--yellow); border-color: rgba(210,153,34,.35); }
+.hbtn.grace:hover   { background: rgba(210,153,34,.1); }
+.hbtn.grace.pending { color: var(--muted); border-color: var(--border); }
+.hbtn.grace.pending:hover { background: rgba(255,255,255,.05); }
+
+/* ── Main ─────────────────────────────────────────────────────── */
+main { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; }
+
+/* ── Cards ────────────────────────────────────────────────────── */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 16px; transition: border-color .2s;
+}
+.card:hover { border-color: var(--muted); }
+.card.wide  { grid-column: span 2; }
+.card.alert { border-color: var(--red) !important; }
+.card.found { border-color: var(--green) !important; background: rgba(63,185,80,.04) !important; }
+.card .lbl {
+  font-size: 10px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 1px; margin-bottom: 8px;
+}
+.card .val { font-size: 15px; font-weight: 600; word-break: break-all; }
+.card .val.sm   { font-size: 11px; line-height: 1.6; }
+.card .val.c-green  { color: var(--green); }
+.card .val.c-red    { color: var(--red); }
+.card .val.c-yellow { color: var(--yellow); }
+.card .val.c-cyan   { color: var(--cyan); }
+.card .val.c-muted  { color: var(--muted); }
+
+/* ── Files panel ──────────────────────────────────────────────── */
+.files-section { display: none; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.files-section.visible { display: grid; }
+.file-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px;
+  border-left-width: 3px; border-left-style: solid;
+}
+.file-card.fc-in      { border-left-color: var(--green); }
+.file-card.fc-out     { border-left-color: var(--cyan); }
+.file-card.fc-pending { border-left-color: var(--yellow); }
+.file-card .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+.file-count { float: right; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; }
+.fc-in .file-count      { background: rgba(63,185,80,.15);   color: var(--green); }
+.fc-out .file-count     { background: rgba(57,197,207,.15);  color: var(--cyan); }
+.fc-pending .file-count { background: rgba(210,153,34,.15);  color: var(--yellow); }
+.file-body {
+  max-height: 140px; overflow-y: auto;
+  font-size: 11px; line-height: 1.6;
+  margin-top: 6px;
+}
+.file-body::-webkit-scrollbar { width: 4px; }
+.file-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.addr-row { padding: 2px 0; color: var(--text); border-bottom: 1px solid rgba(48,54,61,.6); }
+.addr-row:last-child { border-bottom: none; }
+.key-row  { padding: 2px 0; color: var(--yellow); font-size: 10px; word-break: break-all; border-bottom: 1px solid rgba(48,54,61,.6); }
+.key-row:last-child { border-bottom: none; }
+.key-more { font-size: 10px; color: var(--muted); padding-top: 4px; }
+.out-body { white-space: pre-wrap; word-break: break-word; color: var(--cyan); font-size: 10px; }
+
+/* ── GPU rows ─────────────────────────────────────────────────── */
+.gpu-list { display: flex; flex-direction: column; gap: 6px; }
+.gpu-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 6px;
+  background: rgba(57,197,207,.05);
+  border: 1px solid rgba(57,197,207,.15);
+}
+.gpu-idx {
+  background: rgba(57,197,207,.18);
+  color: var(--cyan);
+  border: 1px solid rgba(57,197,207,.35);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10px; font-weight: 700;
+  white-space: nowrap; flex-shrink: 0;
+}
+.gpu-name { font-size: 12px; color: var(--text); }
+.gpu-unknown { font-size: 12px; color: var(--muted); font-style: italic; }
+
+/* ── Session bar ──────────────────────────────────────────────── */
+.session-bar {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 18px;
+  display: flex; gap: 28px; flex-wrap: wrap; align-items: center;
+}
+.sstat { display: flex; flex-direction: column; gap: 3px; }
+.sstat .sl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.sstat .sv { font-size: 14px; font-weight: 600; }
+.sstat .sv.speed { color: var(--green); }
+
+/* ── Log panel ────────────────────────────────────────────────── */
+.log-panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; display: flex; flex-direction: column;
+}
+.log-hdr {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.log-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.filter-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.fbtn {
+  padding: 2px 9px; border-radius: 10px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 11px;
+  font-family: inherit; transition: all .15s;
+}
+.fbtn:hover { color: var(--text); border-color: var(--border); }
+.fbtn.active             { color: var(--text);   border-color: var(--border); background: var(--bg); }
+.fbtn.fi.active          { color: var(--blue);   border-color: var(--blue); }
+.fbtn.fw.active          { color: var(--yellow); border-color: var(--yellow); }
+.fbtn.fe.active          { color: var(--red);    border-color: var(--red); }
+.fbtn.fs.active          { color: var(--green);  border-color: var(--green); }
+.fbtn.fk.active          { color: var(--purple); border-color: var(--purple); }
+
+.as-lbl { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 11px; color: var(--muted); user-select: none; }
+.as-lbl input { cursor: pointer; accent-color: var(--green); }
+.clr-btn {
+  padding: 2px 8px; border-radius: 4px;
+  border: 1px solid var(--border); background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 11px; font-family: inherit;
+}
+.clr-btn:hover { color: var(--text); background: rgba(255,255,255,.04); }
+.conn { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.conn.off { background: var(--red); }
+
+.log-body {
+  height: 46vh; overflow-y: auto;
+  padding: 8px 0; font-size: 12px; line-height: 1.7;
+}
+.log-body::-webkit-scrollbar { width: 5px; }
+.log-body::-webkit-scrollbar-track { background: transparent; }
+.log-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Log lines ────────────────────────────────────────────────── */
+.ll {
+  display: block;
+  white-space: pre-wrap; word-break: break-word;
+  padding: 1px 16px 1px 14px;
+  border-left: 2px solid transparent;
+}
+.ll.hidden { display: none; }
+
+.ll.lvl-Error   { border-left-color: var(--red);    background: rgba(248,81,73,.05); }
+.ll.lvl-Warning { border-left-color: var(--yellow);  background: rgba(210,153,34,.04); }
+.ll.lvl-Success { border-left-color: var(--green);   background: rgba(63,185,80,.04); }
+.ll.lvl-KEYFOUND{ border-left-color: var(--purple);  background: rgba(210,168,255,.06); }
+.ll.lvl-Info    { border-left-color: transparent; }
+.ll.lvl-Other   { border-left-color: transparent; }
+
+.log-ts   { color: var(--muted); }
+.log-tag  { font-weight: 700; }
+.log-tag.lv-Info     { color: var(--blue); }
+.log-tag.lv-Warning  { color: var(--yellow); }
+.log-tag.lv-Error    { color: var(--red); }
+.log-tag.lv-Success  { color: var(--green); }
+.log-tag.lv-KEYFOUND { color: var(--purple); }
+.log-tag.lv-Timer    { color: var(--yellow); }
+.log-tag.lv-Other    { color: var(--muted); }
+
+.log-msg.lv-Error    { color: #ffaaaa; }
+.log-msg.lv-Warning  { color: #ffe080; }
+.log-msg.lv-Success  { color: #a3e6b3; }
+.log-msg.lv-KEYFOUND { color: var(--purple); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">⚡ <span class="accent">GPU</span> Miner</div>
+  <div id="badge" class="badge stopped">
+    <span class="dot"></span><span id="badge-txt">STOPPED</span>
+  </div>
+  <div class="pid-label" id="pid-lbl"></div>
+  <div class="spacer"></div>
+
+  <!-- Telegram -->
+  <button id="tg-toggle" class="hbtn tg" onclick="toggleTelegram()" title="Toggle Telegram notifications">📡 Telegram: <span id="tg-state">…</span></button>
+
+  <!-- Miner controls (only script.py, dashboard stays up) -->
+  <div class="btn-group">
+    <span class="btn-group-label">Miner</span>
+    <button class="hbtn g" onclick="ctrl('start')">▶ Start</button>
+    <button class="hbtn y" onclick="ctrl('restart')">↺ Restart</button>
+    <button class="hbtn r" onclick="ctrl('stop')">■ Stop</button>
+    <button id="btn-grace" class="hbtn grace" onclick="toggleGraceful()" title="Wait for current block to finish, then stop">⏳ Stop After Block</button>
+  </div>
+
+  <!-- Emergency -->
+  <div class="btn-group emergency">
+    <span class="btn-group-label">Emergency</span>
+    <button class="hbtn r-solid" onclick="stopAll()" title="Kill miner and dashboard immediately">🛑 Stop All</button>
+  </div>
+</header>
+
+<main>
+  <!-- Status cards -->
+  <div class="cards" id="cards">
+    <div class="card wide"><div class="lbl">Current Keyspace</div><div class="val sm c-cyan" id="c-range">—</div></div>
+    <div class="card"><div class="lbl">Addresses</div><div class="val" id="c-addresses">—</div></div>
+    <div class="card"><div class="lbl">Pending Keys</div><div class="val" id="c-pending">—</div></div>
+    <div class="card"><div class="lbl">Last Batch</div><div class="val sm" id="c-batch">—</div></div>
+    <div class="card" id="card-error"><div class="lbl">Last Error</div><div class="val sm c-muted" id="c-error">—</div></div>
+    <div class="card" id="card-found"><div class="lbl">Key Found</div><div class="val sm c-muted" id="c-found">—</div></div>
+    <div class="card"><div class="lbl">Next Fetch In</div><div class="val" id="c-next">—</div></div>
+    <div class="card wide" id="card-gpu"><div class="lbl">GPU(s)</div><div id="c-gpu"><span class="gpu-unknown">—</span></div></div>
+  </div>
+
+  <!-- Session bar -->
+  <div class="session-bar">
+    <div class="sstat"><div class="sl">Session Uptime</div><div class="sv" id="s-up">—</div></div>
+    <div class="sstat"><div class="sl">Blocks Done</div><div class="sv" id="s-blocks">0</div></div>
+    <div class="sstat"><div class="sl">Consecutive OK</div><div class="sv" id="s-consec">0</div></div>
+    <div class="sstat"><div class="sl">Keyspace Searched</div><div class="sv" id="s-ks">—</div></div>
+    <div class="sstat"><div class="sl">Avg Speed</div><div class="sv speed" id="s-speed">—</div></div>
+    <div class="sstat"><div class="sl">Worker</div><div class="sv" id="s-worker">—</div></div>
+    <div class="sstat"><div class="sl">Algorithm</div><div class="sv" id="s-algo">—</div></div>
+    <div class="sstat"><div class="sl">Last Updated</div><div class="sv" id="s-updated">—</div></div>
+  </div>
+
+  <!-- Files panel (shown only when files have data) -->
+  <div class="files-section" id="files-section">
+    <div class="file-card fc-in" id="fc-in" style="display:none">
+      <div class="lbl">📋 in.txt — Target Addresses <span class="file-count" id="in-count"></span></div>
+      <div class="file-body" id="in-body"></div>
+    </div>
+    <div class="file-card fc-out" id="fc-out" style="display:none">
+      <div class="lbl">📤 out.txt — GPU Output <span class="file-count" id="out-count"></span></div>
+      <div class="file-body" id="out-body"></div>
+    </div>
+    <div class="file-card fc-pending" id="fc-pending" style="display:none">
+      <div class="lbl">⏳ Pending Keys <span class="file-count" id="pending-count"></span></div>
+      <div class="file-body" id="pending-body"></div>
+    </div>
+  </div>
+
+  <!-- Log viewer -->
+  <div class="log-panel">
+    <div class="log-hdr">
+      <span class="log-title">Live Logs</span>
+      <div class="filter-row">
+        <button class="fbtn active" data-f="all">All</button>
+        <button class="fbtn fi"     data-f="Info">Info</button>
+        <button class="fbtn fw"     data-f="Warning">Warning</button>
+        <button class="fbtn fe"     data-f="Error">Error</button>
+        <button class="fbtn fs"     data-f="Success">Success</button>
+        <button class="fbtn fk"     data-f="KEYFOUND">Found</button>
+      </div>
+      <div class="spacer"></div>
+      <label class="as-lbl"><input type="checkbox" id="as" checked> Auto-scroll</label>
+      <button class="clr-btn" onclick="clearLog()">Clear</button>
+      <div class="conn" id="conn" title="SSE connection"></div>
+    </div>
+    <div class="log-body" id="log-body"></div>
+  </div>
+</main>
+
+<script>
+// ── Helpers ──────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── ANSI → HTML (for unstructured GPU output lines) ──────────────
+const ANSI_MAP = {
+  '91':'#ff6b6b','31':'#ff6b6b',
+  '92':'#69db7c','32':'#69db7c',
+  '93':'#ffd43b','33':'#ffd43b',
+  '94':'#74c0fc','34':'#74c0fc',
+  '95':'#da77f2','35':'#da77f2',
+  '96':'#66d9e8','36':'#66d9e8',
+};
+function ansiToHtml(raw) {
+  const s = esc(raw);
+  let out = '', open = false;
+  const parts = s.split(/\x1b\[(\d+)m/);
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0) { out += parts[i]; continue; }
+    if (open) { out += '</span>'; open = false; }
+    const c = ANSI_MAP[parts[i]];
+    if (c) { out += `<span style="color:${c}">`; open = true; }
+  }
+  return open ? out + '</span>' : out;
+}
+
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+// ── Log line rendering ───────────────────────────────────────────
+const LOG_RE = /^\[([^\]]+)\]\s+\[([^\]]+)\]\s*(.*)$/;
+
+const LEVEL_NORM = {
+  'info':     'Info',
+  'warning':  'Warning',
+  'error':    'Error',
+  'success':  'Success',
+  'keyfound': 'KEYFOUND',
+  'keyfound error': 'Error',
+  'timer':    'Timer',
+};
+
+function detectLevel(clean) {
+  const m = clean.match(/\[([^\]]+)\]/g);
+  if (!m || m.length < 2) return 'Other';
+  const raw = m[1].replace(/[[\]]/g, '').trim().toLowerCase();
+  return LEVEL_NORM[raw] || 'Other';
+}
+
+function renderLogLine(raw) {
+  const clean = stripAnsi(raw);
+  const m = clean.match(LOG_RE);
+
+  if (!m) {
+    return ansiToHtml(raw);
+  }
+
+  const [, ts, lvlRaw] = m;
+  const msg = m[3] || '';
+  const lvl = LEVEL_NORM[lvlRaw.trim().toLowerCase()] || 'Other';
+
+  return (
+    `<span class="log-ts">[${esc(ts)}]</span> ` +
+    `<span class="log-tag lv-${lvl}">[${esc(lvlRaw)}]</span> ` +
+    `<span class="log-msg lv-${lvl}">${esc(msg)}</span>`
+  );
+}
+
+// ── Average speed tracking ───────────────────────────────────────
+// Supports per-GPU lines: "GPU#0: 1234.5 Mkeys/s" and generic: "1234.5 Mkeys/s"
+// Also: "Speed: 1234.5 Mkeys/s", "Throughput: 1234.5 MK/s"
+const SPEED_RE_GPU  = /GPU\s*#?(\d+)[^:]*?:\s*.*?(\d[\d,]*\.?\d*)\s*(G|M|K)?keys?\/s/i;
+const SPEED_RE_GEN  = /(?:speed|throughput|rate)?[:\s]*(\d[\d,]*\.?\d*)\s*(G|M|K)?keys?\/s/i;
+
+const speedBuffers = {}; // { gpuKey: [readings...] }, gpuKey = '0','1',... or 'global'
+const SPEED_BUF_SIZE = 20;
+
+function parseSpeedMk(value, unit) {
+  const v = parseFloat(String(value).replace(/,/g, ''));
+  if (isNaN(v)) return null;
+  const u = (unit || 'M').toUpperCase();
+  if (u === 'G') return v * 1000;
+  if (u === 'K') return v / 1000;
+  return v; // M default
+}
+
+function ingestSpeedLine(raw) {
+  const clean = stripAnsi(raw);
+
+  // Try per-GPU first
+  const mg = clean.match(SPEED_RE_GPU);
+  if (mg) {
+    const key = mg[1];
+    const mk = parseSpeedMk(mg[2], mg[3]);
+    if (mk !== null) {
+      if (!speedBuffers[key]) speedBuffers[key] = [];
+      speedBuffers[key].push(mk);
+      if (speedBuffers[key].length > SPEED_BUF_SIZE) speedBuffers[key].shift();
+    }
+    return;
+  }
+
+  // Generic speed line
+  const gg = clean.match(SPEED_RE_GEN);
+  if (gg) {
+    const mk = parseSpeedMk(gg[1], gg[2]);
+    if (mk !== null) {
+      if (!speedBuffers['global']) speedBuffers['global'] = [];
+      speedBuffers['global'].push(mk);
+      if (speedBuffers['global'].length > SPEED_BUF_SIZE) speedBuffers['global'].shift();
+    }
+  }
+}
+
+function computeAvgSpeed() {
+  const keys = Object.keys(speedBuffers);
+  if (!keys.length) return null;
+
+  let total = 0;
+  for (const k of keys) {
+    const buf = speedBuffers[k];
+    if (!buf.length) continue;
+    total += buf.reduce((a, b) => a + b, 0) / buf.length;
+  }
+  return total;
+}
+
+function fmtSpeed(mk) {
+  if (mk === null || mk === undefined) return '—';
+  if (mk >= 1000) return (mk / 1000).toFixed(2) + ' Gkeys/s';
+  if (mk < 1)    return (mk * 1000).toFixed(0) + ' Kkeys/s';
+  return mk.toFixed(2) + ' Mkeys/s';
+}
+
+function clearSpeedBuffers() {
+  for (const k of Object.keys(speedBuffers)) delete speedBuffers[k];
+  document.getElementById('s-speed').textContent = '—';
+}
+
+// ── Log viewer ───────────────────────────────────────────────────
+const logBody = document.getElementById('log-body');
+const asChk   = document.getElementById('as');
+const connDot = document.getElementById('conn');
+let filter = 'all';
+
+function appendLine(raw) {
+  if (!raw.trim()) return;
+  const clean = stripAnsi(raw);
+  const lvl   = detectLevel(clean);
+  const el    = document.createElement('span');
+  el.className = `ll lvl-${lvl}`;
+  if (filter !== 'all' && lvl !== filter) el.classList.add('hidden');
+  el.innerHTML = renderLogLine(raw);
+  logBody.appendChild(el);
+  while (logBody.children.length > 2000) logBody.removeChild(logBody.firstChild);
+  if (asChk.checked) logBody.scrollTop = logBody.scrollHeight;
+
+  // Parse speed from this line
+  ingestSpeedLine(raw);
+  const avg = computeAvgSpeed();
+  if (avg !== null) {
+    const el2 = document.getElementById('s-speed');
+    if (el2) el2.textContent = fmtSpeed(avg);
+  }
+}
+
+function clearLog() { logBody.innerHTML = ''; }
+
+document.querySelectorAll('.fbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.fbtn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filter = btn.dataset.f;
+    document.querySelectorAll('.ll').forEach(el => {
+      const lv = (el.className.match(/lvl-(\w+)/) || [])[1] || 'Other';
+      el.classList.toggle('hidden', filter !== 'all' && lv !== filter);
+    });
+    if (asChk.checked) logBody.scrollTop = logBody.scrollHeight;
+  });
+});
+
+// SSE
+function connectSSE() {
+  const es = new EventSource('/api/logs/stream');
+  es.onopen    = () => connDot.classList.remove('off');
+  es.onmessage = e  => appendLine(JSON.parse(e.data));
+  es.onerror   = () => {
+    connDot.classList.add('off');
+    es.close();
+    setTimeout(connectSSE, 3000);
+  };
+}
+connectSSE();
+
+// ── GPU rendering ────────────────────────────────────────────────
+function renderGPUs(raw) {
+  if (!raw) return '<span class="gpu-unknown">—</span>';
+  const lines = String(raw).split('\n').map(l => l.trim()).filter(l => l && l !== '-');
+  if (!lines.length) return '<span class="gpu-unknown">—</span>';
+
+  const rows = lines.map(line => {
+    const m = line.match(/^GPU\s*#?(\d+)\s+(.+)$/i);
+    if (m) {
+      return `<div class="gpu-row"><span class="gpu-idx">#${esc(m[1])}</span><span class="gpu-name">${esc(m[2].trim())}</span></div>`;
+    }
+    return `<div class="gpu-row"><span class="gpu-name">${esc(line)}</span></div>`;
+  });
+
+  return `<div class="gpu-list">${rows.join('')}</div>`;
+}
+
+// ── Graceful stop state ──────────────────────────────────────────
+let gracefulPending = false;
+
+function applyGracefulState(pending) {
+  gracefulPending = pending;
+  const btn = document.getElementById('btn-grace');
+  if (!btn) return;
+  if (pending) {
+    btn.className = 'hbtn grace pending';
+    btn.textContent = '↩ Cancel Stop';
+    btn.title = 'Cancel the graceful stop request';
+  } else {
+    btn.className = 'hbtn grace';
+    btn.textContent = '⏳ Stop After Block';
+    btn.title = 'Wait for current block to finish, then stop';
+  }
+}
+
+async function toggleGraceful() {
+  const action = gracefulPending ? 'cancel-graceful' : 'stop-graceful';
+  try {
+    const r = await fetch(`/api/miner/${action}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      applyGracefulState(!gracefulPending);
+      appendLine(`[Dashboard] ${d.out}`);
+    } else {
+      appendLine(`[Dashboard] Error: ${d.out}`);
+    }
+  } catch (e) {
+    appendLine(`[Dashboard] Error: ${e.message}`);
+  }
+}
+
+async function stopAll() {
+  if (!confirm('Stop BOTH the miner and this dashboard?\n\nYou will lose access to this page immediately.')) return;
+  try {
+    await fetch('/api/miner/stop-all', { method: 'POST' });
+  } catch (_) {}
+  // Dashboard will shut down — show a message
+  document.body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;font-family:monospace;background:#0d1117;color:#e6edf3;">
+      <div style="font-size:32px;">🛑</div>
+      <div style="font-size:18px;font-weight:700;">All processes stopped.</div>
+      <div style="color:#8b949e;font-size:13px;">Restart with: <code style="color:#39c5cf;">./miner.sh start</code></div>
+    </div>`;
+}
+
+// ── Status polling ───────────────────────────────────────────────
+function fmt(v) {
+  const s = String(v ?? '').trim();
+  return s && s !== '-' ? s : '—';
+}
+function fmtKS(n) {
+  const v = parseInt(n) || 0;
+  if (v >= 1e12) return (v/1e12).toFixed(2)+'T';
+  if (v >= 1e9)  return (v/1e9).toFixed(2)+'B';
+  if (v >= 1e6)  return (v/1e6).toFixed(2)+'M';
+  if (v >= 1e3)  return (v/1e3).toFixed(2)+'K';
+  return v ? String(v) : '—';
+}
+function fmtUptime(ts) {
+  if (!ts) return '—';
+  const e = Math.max(0, Math.floor(Date.now()/1000 - ts));
+  const h = Math.floor(e/3600), m = Math.floor((e%3600)/60), s = e%60;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+function fmtTime(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+}
+function set(id, html)  { const el = document.getElementById(id); if (el) el.innerHTML  = html; }
+function setText(id, t) { const el = document.getElementById(id); if (el) el.textContent = t; }
+
+let prevRunning = null;
+
+function applyStatus(d) {
+  const badge = document.getElementById('badge');
+  if (d.miner_running) {
+    badge.className = 'badge running';
+    document.getElementById('badge-txt').textContent = 'RUNNING';
+    document.getElementById('pid-lbl').textContent = d.miner_pid ? `PID ${d.miner_pid}` : '';
+  } else {
+    badge.className = 'badge stopped';
+    document.getElementById('badge-txt').textContent = 'STOPPED';
+    document.getElementById('pid-lbl').textContent = '';
+    // Clear speed buffers when miner stops
+    if (prevRunning === true) clearSpeedBuffers();
+  }
+  prevRunning = d.miner_running;
+
+  // Keyspace
+  const range = fmt(d.range);
+  set('c-range', range !== '—' ? esc(range) : '<span style="color:var(--muted)">—</span>');
+
+  setText('c-addresses', fmt(d.addresses));
+
+  const pending = parseInt(d.pending_keys) || 0;
+  const pendEl = document.getElementById('c-pending');
+  pendEl.textContent = pending || '—';
+  pendEl.style.color = pending > 0 ? 'var(--yellow)' : '';
+
+  setText('c-batch', fmt(d.last_batch));
+
+  const err = fmt(d.last_error);
+  const errCard = document.getElementById('card-error');
+  const errEl   = document.getElementById('c-error');
+  if (err !== '—') {
+    errCard.classList.add('alert');
+    errEl.className = 'val sm c-red';
+  } else {
+    errCard.classList.remove('alert');
+    errEl.className = 'val sm c-muted';
+  }
+  errEl.textContent = err;
+
+  const found = fmt(d.keyfound);
+  const foundCard = document.getElementById('card-found');
+  const foundEl   = document.getElementById('c-found');
+  if (found !== '—') {
+    foundCard.classList.add('found');
+    foundEl.className = 'val sm c-green';
+  } else {
+    foundCard.classList.remove('found');
+    foundEl.className = 'val sm c-muted';
+  }
+  foundEl.textContent = found;
+
+  const next = parseInt(d.next_fetch_in) || 0;
+  setText('c-next', next > 0 ? `${next}s` : '—');
+
+  set('c-gpu', renderGPUs(d.gpu));
+
+  if (d.telegram_share !== undefined) applyTelegramToggle(d.telegram_share);
+
+  // Graceful stop state (from server)
+  if (d.graceful_stop_pending !== undefined) applyGracefulState(d.graceful_stop_pending);
+
+  // Session bar (don't overwrite live speed — managed by SSE)
+  setText('s-up',      fmtUptime(d.session_started_ts));
+  setText('s-blocks',  d.session_blocks  ?? '0');
+  setText('s-consec',  d.session_consecutive ?? '0');
+  setText('s-ks',      fmtKS(d.session_keyspace_total));
+  setText('s-worker',  fmt(d.worker));
+  setText('s-algo',    fmt(d.algorithm));
+  setText('s-updated', fmtTime(d.updated_at));
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    if (r.ok) applyStatus(await r.json());
+  } catch (_) {}
+}
+pollStatus();
+setInterval(pollStatus, 3000);
+
+// ── Telegram toggle ──────────────────────────────────────────────
+function applyTelegramToggle(enabled) {
+  const btn   = document.getElementById('tg-toggle');
+  const state = document.getElementById('tg-state');
+  if (!btn || !state) return;
+  state.textContent = enabled ? 'ON' : 'OFF';
+  btn.className = `hbtn tg ${enabled ? 'on' : 'off'}`;
+}
+
+async function toggleTelegram() {
+  try {
+    const r = await fetch('/api/settings/telegram', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) applyTelegramToggle(d.telegram_share);
+    else appendLine(`[Dashboard] Telegram toggle failed: ${d.error || ''}`);
+  } catch (e) {
+    appendLine(`[Dashboard] Telegram toggle error: ${e.message}`);
+  }
+}
+
+// ── Files panel ──────────────────────────────────────────────────
+async function pollFiles() {
+  try {
+    const r = await fetch('/api/files');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    let anyVisible = false;
+
+    const inCard = document.getElementById('fc-in');
+    if (d.in) {
+      const lines = d.in.split('\n').filter(l => l.trim());
+      document.getElementById('in-count').textContent = lines.length;
+      document.getElementById('in-body').innerHTML =
+        lines.map(a => `<div class="addr-row">${esc(a)}</div>`).join('');
+      inCard.style.display = '';
+      anyVisible = true;
+    } else {
+      inCard.style.display = 'none';
+    }
+
+    const outCard = document.getElementById('fc-out');
+    if (d.out) {
+      const outLines = d.out.split('\n').filter(l => l.trim());
+      document.getElementById('out-count').textContent = outLines.length + ' lines';
+      document.getElementById('out-body').innerHTML =
+        `<div class="out-body">${esc(d.out)}</div>`;
+      outCard.style.display = '';
+      anyVisible = true;
+    } else {
+      outCard.style.display = 'none';
+    }
+
+    const pendCard = document.getElementById('fc-pending');
+    if (d.pending_keys && d.pending_keys.length) {
+      const keys = d.pending_keys;
+      document.getElementById('pending-count').textContent = keys.length;
+      const preview = keys.slice(0, 5).map(k =>
+        `<div class="key-row">${esc(String(k))}</div>`
+      ).join('');
+      const more = keys.length > 5
+        ? `<div class="key-more">+ ${keys.length - 5} more…</div>` : '';
+      document.getElementById('pending-body').innerHTML = preview + more;
+      pendCard.style.display = '';
+      anyVisible = true;
+    } else {
+      pendCard.style.display = 'none';
+    }
+
+    const section = document.getElementById('files-section');
+    section.classList.toggle('visible', anyVisible);
+  } catch (_) {}
+}
+pollFiles();
+setInterval(pollFiles, 5000);
+
+// ── Miner controls (miner only — dashboard stays up) ─────────────
+async function ctrl(cmd) {
+  const warns = {
+    stop: 'Stop the miner? (Dashboard will keep running.)',
+    restart: 'Restart the miner? (Dashboard will keep running.)',
+  };
+  if (warns[cmd] && !confirm(warns[cmd])) return;
+  try {
+    const r = await fetch(`/api/miner/${cmd}`, { method: 'POST' });
+    const d = await r.json();
+    if (d.out) appendLine(`[Dashboard] ${d.out}`);
+    setTimeout(pollStatus, 1500);
+  } catch (e) {
+    appendLine(`[Dashboard] Error: ${e.message}`);
+  }
+}
+</script>
+</body>
+</html>

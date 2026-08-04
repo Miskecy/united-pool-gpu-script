@@ -62,7 +62,8 @@ LAST_MESSAGE_HASH = None
 def _apply_settings(s):
     global TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, API_URL, POOL_TOKEN, ADDITIONAL_ADDRESSES, BLOCK_LENGTH
     global APP_PATH, APP_ARGS, PROGRAM_KIND, WORKER_NAME, ONE_SHOT, GPU_INDEX_MAP
-    global POST_BLOCK_DELAY_SECONDS, POST_BLOCK_DELAY_ENABLED
+    global POST_BLOCK_DELAY_SECONDS, POST_BLOCK_DELAY_ENABLED, TELEGRAM_SHARE
+    TELEGRAM_SHARE = bool(s.get("telegram_share", True))
     TELEGRAM_BOT_TOKEN = s.get("telegram_accesstoken", "")
     TELEGRAM_CHAT_ID = str(s.get("telegram_chatid", ""))
     API_URL = str(s.get("api_url", ""))
@@ -131,7 +132,9 @@ def refresh_settings():
     s = _load_settings()
     _apply_settings(s)
     try:
-        configure_telegram(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, WORKER_NAME, TELEGRAM_STATE_FILE, logger)
+        token = TELEGRAM_BOT_TOKEN if TELEGRAM_SHARE else ""
+        chat  = TELEGRAM_CHAT_ID  if TELEGRAM_SHARE else ""
+        configure_telegram(token, chat, WORKER_NAME, TELEGRAM_STATE_FILE, logger)
     except Exception:
         pass
 
@@ -150,6 +153,8 @@ CURRENT_ADDR_COUNT = 10
 CURRENT_RANGE_START = None
 CURRENT_RANGE_END = None
 PENDING_KEYS_FILE = "pending_keys.json"
+STATUS_FILE = "status.json"
+TELEGRAM_SHARE = True
 LAST_POST_ATTEMPT = 0
 ALL_BLOCKS_SOLVED = False
 PROCESSED_ONE_BLOCK = False
@@ -848,8 +853,19 @@ def _format_duration(seconds):
         parts.append(f"{s} sec" + ("s" if s != 1 else ""))
     return " ".join(parts)
 
+def _write_status_file():
+    try:
+        data = dict(STATUS)
+        data["updated_at"] = datetime.now().isoformat()
+        data["telegram_share"] = TELEGRAM_SHARE
+        with open(STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, default=str)
+    except Exception:
+        pass
+
 def update_status(fields=None):
     _tg_update_status(STATUS, fields or {}, gpu_fallback="-")
+    _write_status_file()
 
 def update_status_rl(fields, category, min_interval):
     try:
@@ -858,6 +874,7 @@ def update_status_rl(fields, category, min_interval):
     except Exception:
         pass
     _tg_update_status_rl(STATUS, fields or {}, category, min_interval, gpu_fallback="-")
+    _write_status_file()
 
 # ----------------------------------------------------------------------------------------------
 
@@ -1563,6 +1580,13 @@ if __name__ == "__main__":
                 _save_pending_keys()
             if ONE_SHOT and PROCESSED_ONE_BLOCK:
                 logger("Info", "One-shot mode enabled. Exiting after first block.")
+                break
+            if os.path.exists(".stop_after_block"):
+                try:
+                    os.remove(".stop_after_block")
+                except Exception:
+                    pass
+                logger("Info", "Graceful stop requested. Exiting cleanly after block.")
                 break
             block_data = fetch_block_data()
             if ALL_BLOCKS_SOLVED:

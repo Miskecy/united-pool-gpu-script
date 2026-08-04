@@ -4,7 +4,7 @@
   <img src="/index.jpg">
 </p>
 
-A worker script for [United Puzzle Pool](https://unitedpuzzlepool.com). Fetches work blocks from the pool API, runs GPU cracking software (`VanitySearch-V3` or `BitCrack`) across all detected GPUs, and submits results automatically. Supports any number of GPUs with weighted keyspace splitting and real-time Telegram status updates.
+A worker script for [United Puzzle Pool](https://unitedpuzzlepool.com). Fetches work blocks from the pool API, runs GPU cracking software (`VanitySearch-V3` or `BitCrack`) across all detected GPUs, and submits results automatically. Supports any number of GPUs with weighted keyspace splitting, real-time Telegram status updates, and a local web dashboard.
 
 ---
 
@@ -16,6 +16,7 @@ A worker script for [United Puzzle Pool](https://unitedpuzzlepool.com). Fetches 
 - [Configuration](#configuration)
 - [Telegram Setup](#telegram-setup)
 - [Running the Miner](#running-the-miner)
+- [Web Dashboard](#web-dashboard)
 - [Managing in the Background (VPS / SSH)](#managing-in-the-background-vps--ssh)
 - [How It Works](#how-it-works)
 - [Troubleshooting](#troubleshooting)
@@ -25,7 +26,7 @@ A worker script for [United Puzzle Pool](https://unitedpuzzlepool.com). Fetches 
 ## Requirements
 
 - Ubuntu 22.04 (other Debian-based distros may work)
-- NVIDIA GPU(s) with CUDA 12.1 compatible drivers
+- NVIDIA GPU(s) with CUDA 12.8 compatible drivers
 - Python 3.8+
 - Internet access to reach the pool API
 
@@ -49,10 +50,10 @@ bash miner_setup.sh
 This installs everything needed and continues even if individual steps fail (e.g. NVIDIA download issues). It handles:
 
 - System packages: `build-essential`, `git`, `python3`, `wget`, `curl`, `ca-certificates`
-- NVIDIA CUDA 12.1 repository, compiler, libraries, and runtime
+- NVIDIA CUDA 12.8 repository, compiler, libraries, and runtime
 - CUDA environment variables written to `~/.bashrc`
 - CUDA libs registered system-wide via `ldconfig` — no need to manually set `LD_LIBRARY_PATH`
-- Python packages: `requests`, `colorama`
+- Python packages: `requests`, `colorama`, `flask`, `werkzeug`
 - Execute permissions on binaries in `bin/`
 
 At the end it prints a summary of any warnings or errors.
@@ -140,8 +141,11 @@ nano settings.json
     "post_block_delay_enabled": false,
     "post_block_delay_minutes": 1,
     "send_additional_keys_to_api": false,
+    "telegram_share": true,
     "telegram_accesstoken": "YOUR_BOT_TOKEN",
-    "telegram_chatid": "YOUR_CHAT_ID"
+    "telegram_chatid": "YOUR_CHAT_ID",
+    "dashboard_password": "",
+    "dashboard_port": 8080
 }
 ```
 
@@ -149,7 +153,7 @@ nano settings.json
 | :---- | :---------- | :------ |
 | `api_url` | Pool API base URL | `https://unitedpuzzlepool.com/api/block` |
 | `user_token` | Your pool authentication token | `IOxQ4EbVt...` |
-| `worker_name` | Label shown in Telegram notifications | `GPU-Rig-01` |
+| `worker_name` | Label shown in Telegram and dashboard | `GPU-Rig-01` |
 | `additional_addresses` | Bitcoin addresses to watch — script stops and saves the key if found | `["1PWo3J..."]` |
 | `program_name` | Parser mode: `vanitysearch-v3`, `vanitysearch`, or `bitcrack` | `vanitysearch-v3` |
 | `gpu_index_map` | Per-GPU binary and workload share — see below | |
@@ -159,8 +163,11 @@ nano settings.json
 | `post_block_delay_enabled` | Wait between blocks | `false` |
 | `post_block_delay_minutes` | How long to wait between blocks (minutes) | `1` |
 | `send_additional_keys_to_api` | Also submit keys found for `additional_addresses` to the pool | `false` |
+| `telegram_share` | Enable/disable Telegram notifications (can also be toggled from the dashboard) | `true` |
 | `telegram_accesstoken` | Telegram bot token | `123456:ABC...` |
 | `telegram_chatid` | Telegram chat/user ID to send status to | `468056589` |
+| `dashboard_password` | Password for the web dashboard — leave empty to disable auth | `"mysecretpass"` |
+| `dashboard_port` | Port the web dashboard listens on | `8080` |
 
 ### Getting your pool token
 
@@ -269,31 +276,82 @@ Send any message to your bot on Telegram. The first time the script runs it will
 
 ## Running the Miner
 
-### Foreground (interactive)
+### Foreground (interactive / debug)
 
 ```bash
 python3 script.py
 ```
 
-Press `Ctrl+C` to stop. Output is shown directly in the terminal.
+Press `Ctrl+C` to stop. Output is shown directly in the terminal. The dashboard is not started in this mode.
 
 ### Background via `miner.sh` (recommended for VPS)
 
+`./miner.sh start` launches **both** the miner and the web dashboard in the background:
+
 ```bash
-./miner.sh start      # launch in background
-./miner.sh status     # check if running and see PID
-./miner.sh logs       # tail live output — Ctrl+C exits without stopping the miner
-./miner.sh stop       # gracefully stop
-./miner.sh restart    # stop + start (use after editing settings.json)
+./miner.sh start          # launch miner + dashboard
+./miner.sh status         # check both are running and see PIDs
+./miner.sh logs           # tail live miner output — Ctrl+C exits without stopping
+./miner.sh dlogs          # tail live dashboard output — Ctrl+C exits without stopping
+./miner.sh stop           # stop both miner and dashboard
+./miner.sh restart        # stop + start both (use after editing settings.json)
+./miner.sh start-miner    # start miner only (dashboard keeps running)
+./miner.sh stop-miner     # stop miner only (dashboard keeps running)
+./miner.sh restart-miner  # restart miner only (dashboard keeps running)
 ```
 
-All output is saved to `miner.log` in the project folder.
+All miner output is saved to `miner.log`. Dashboard output is saved to `dashboard.log`.
+
+---
+
+## Web Dashboard
+
+The web dashboard gives you a real-time visual view of the miner from any browser — useful when running on a VPS.
+
+### Access
+
+After `./miner.sh start`, open your browser and go to:
+
+```
+http://YOUR_VPS_IP:8080
+```
+
+The port can be changed with `dashboard_port` in `settings.json`.
+
+### Features
+
+| Feature | Details |
+| :------ | :------ |
+| **Status cards** | Current keyspace, addresses, pending keys, last batch, last error, key found, GPU info |
+| **GPU display** | Multiple GPUs shown as individual styled rows with index badge |
+| **Session bar** | Uptime, blocks done, consecutive successes, keyspace searched, average speed, worker name, algorithm |
+| **Average speed** | Live-computed from log output; rolling average of last 20 readings per GPU — single and multi-GPU |
+| **Live log viewer** | Auto-tails `miner.log` with structured color coding — Info (blue), Warning (yellow), Error (red), Success (green), Found (purple) |
+| **Log filter** | Filter by level: All / Info / Warning / Error / Success / Found |
+| **File viewer** | Shows non-empty contents of `in.txt`, `out.txt`, and `pending_keys.json` — hidden when empty |
+| **Telegram toggle** | Enable or disable Telegram notifications from the dashboard — no restart needed |
+| **Miner controls** | Start / Restart / Stop buttons control `script.py` only; dashboard stays running |
+| **Graceful stop** | "Stop After Block" — sets a flag so the miner exits cleanly after the current block finishes (cancellable) |
+| **Emergency stop** | "Stop All" button immediately kills both the miner and the dashboard |
+| **Auto-refresh** | Status cards poll every 3 seconds — no manual refresh needed |
+
+### Password protection
+
+Set a password in `settings.json` to require HTTP Basic Auth when opening the dashboard:
+
+```json
+"dashboard_password": "yourpassword"
+```
+
+Leave it empty (`""`) to allow access without a password.
+
+> **Tip:** For production VPS deployments, put the dashboard behind an nginx reverse proxy with HTTPS. The dashboard itself uses plain HTTP.
 
 ---
 
 ## Managing in the Background (VPS / SSH)
 
-When connecting via SSH you need the miner to keep running after you disconnect. `miner.sh` handles this with `nohup` and a PID file — no extra tools required.
+When connecting via SSH you need the miner to keep running after you disconnect. `miner.sh` handles this with `nohup` and PID files — no extra tools required.
 
 ### First time setup
 
@@ -307,14 +365,14 @@ cd ~/united-pool-gpu-script
 # Make the manager script executable
 chmod +x miner.sh
 
-# Start the miner
+# Start miner + dashboard
 ./miner.sh start
 
-# Watch the output for a few seconds to confirm it is working
+# Watch the miner output for a few seconds to confirm it is working
 ./miner.sh logs
 # Press Ctrl+C to stop watching — the miner keeps running
 
-# Disconnect from SSH — miner continues in background
+# Disconnect from SSH — both processes continue in background
 exit
 ```
 
@@ -324,8 +382,8 @@ exit
 ssh user@your-vps-ip
 cd ~/united-pool-gpu-script
 
-./miner.sh status     # is it still running?
-./miner.sh logs       # see recent output
+./miner.sh status     # are both still running?
+./miner.sh logs       # see recent miner output
 ```
 
 ### Applying settings changes
@@ -341,12 +399,17 @@ nano settings.json
 
 | Goal | Command |
 | :--- | :------ |
-| Start the miner | `./miner.sh start` |
-| Stop the miner | `./miner.sh stop` |
+| Start miner + dashboard | `./miner.sh start` |
+| Stop miner + dashboard | `./miner.sh stop` |
 | Restart after config change | `./miner.sh restart` |
+| Start miner only (dashboard stays up) | `./miner.sh start-miner` |
+| Stop miner only (dashboard stays up) | `./miner.sh stop-miner` |
+| Restart miner only (dashboard stays up) | `./miner.sh restart-miner` |
 | Check if running | `./miner.sh status` |
-| Watch live output | `./miner.sh logs` |
-| Run in foreground (debug) | `python3 script.py` |
+| Watch live miner output | `./miner.sh logs` |
+| Watch live dashboard output | `./miner.sh dlogs` |
+| Run miner in foreground (debug) | `python3 script.py` |
+| Run dashboard only | `python3 dashboard.py` |
 
 ---
 
@@ -376,6 +439,16 @@ nano settings.json
 - If posting fails 3 consecutive times for any reason, the queue is cleared and the script moves on
 - The script never loops indefinitely — stale keys are always discarded automatically
 
+### Dashboard data flow
+
+- `script.py` writes `status.json` after every status update
+- `dashboard.py` reads `status.json` on each poll (every 3 seconds from the browser)
+- Logs are streamed live via Server-Sent Events (SSE) by tailing `miner.log`
+- Miner controls (Start / Stop / Restart) call `miner.sh start-miner / stop-miner / restart-miner` — the dashboard process stays running
+- "Stop After Block" creates a `.stop_after_block` flag file; `script.py` checks for it at the start of each loop and exits cleanly if found
+- "Stop All" kills the miner via its PID file then sends `SIGTERM` to the dashboard itself via a background thread
+- Average speed is computed client-side from SSE log lines — no server changes needed
+
 ---
 
 ## Troubleshooting
@@ -385,11 +458,20 @@ nano settings.json
 The CUDA runtime library is not on the dynamic linker path. Fix permanently:
 
 ```bash
-echo "/usr/local/cuda-12.1/lib64" | sudo tee /etc/ld.so.conf.d/cuda-12-1.conf
+echo "/usr/local/cuda-12.8/lib64" | sudo tee /etc/ld.so.conf.d/cuda-12-8.conf
 sudo ldconfig
 ```
 
 Then restart the miner.
+
+### Dashboard is not accessible from browser
+
+1. Check it is running: `./miner.sh status`
+2. Check the port is open on your VPS firewall:
+   ```bash
+   sudo ufw allow 8080
+   ```
+3. Check the dashboard log for errors: `./miner.sh dlogs`
 
 ### Miner exits immediately after `./miner.sh start`
 

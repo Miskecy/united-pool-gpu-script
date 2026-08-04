@@ -25,5 +25,7 @@
     "send_additional_keys_to_api": false,
     "telegram_share": false,
     "telegram_accesstoken": "YOUR_TELEGRAM_BOT_TOKEN",
-    "telegram_chatid": "YOUR_CHAT_ID"
+    "telegram_chatid": "YOUR_CHAT_ID",
+    "dashboard_password": "",
+    "dashboard_port": 8080
 }
