@@ -3,7 +3,9 @@
 # Usage: ./miner.sh {start|stop|restart|status|logs|dlogs}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON="python3"
+# Use venv python if available, otherwise fall back to system python3
+VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+PYTHON="$( [ -f "$VENV_PYTHON" ] && echo "$VENV_PYTHON" || echo "python3" )"
 MAIN="$SCRIPT_DIR/script.py"
 DASHBOARD="$SCRIPT_DIR/dashboard.py"
 PID_FILE="$SCRIPT_DIR/.miner.pid"

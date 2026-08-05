@@ -16,17 +16,6 @@ fail() { echo -e "${RED}  [FAIL]${NC} $1"; ERRORS+=("FAIL: $1"); }
 
 section() { echo -e "\n${GREEN}==>${NC} $1"; }
 
-try() {
-    local desc="$1"; shift
-    if "$@" 2>/dev/null; then
-        ok "$desc"
-        return 0
-    else
-        fail "$desc"
-        return 1
-    fi
-}
-
 # ─── 1. System update ────────────────────────────────────────────────────────
 
 section "1. System update"
@@ -40,6 +29,7 @@ sudo apt-get install -y \
     git \
     python3 \
     python3-pip \
+    python3-venv \
     wget \
     curl \
     ca-certificates \
@@ -85,7 +75,7 @@ fi
 
 section "5. CUDA environment variables"
 
-# Auto-detect CUDA home: prefer path from nvcc binary, then scan /usr/local
+# Auto-detect CUDA home: prefer path derived from nvcc binary, then directory scan
 CUDA_HOME_PATH=""
 if command -v nvcc &>/dev/null; then
     NVCC_BIN=$(command -v nvcc)
@@ -103,11 +93,10 @@ if [ -z "$CUDA_HOME_PATH" ] || [ ! -d "$CUDA_HOME_PATH" ]; then
 fi
 
 if [ -n "$CUDA_HOME_PATH" ] && [ -d "$CUDA_HOME_PATH" ]; then
-    CUDA_LABEL=$(basename "$CUDA_HOME_PATH")   # e.g. cuda-13.2
+    CUDA_LABEL=$(basename "$CUDA_HOME_PATH")
     MARKER="# ==== CUDA CONFIG (united-pool-gpu-script) ===="
 
     if ! grep -qF "$MARKER" ~/.bashrc 2>/dev/null; then
-        # Remove stale entries from any previous run of this script
         sed -i '/CUDA CONFIG (united-pool-gpu-script)/,+4d' ~/.bashrc 2>/dev/null || true
         cat >> ~/.bashrc <<EOF
 
@@ -125,9 +114,7 @@ EOF
     export PATH="$CUDA_HOME/bin:$PATH"
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
-    # Register libs with system linker — use a version-neutral conf name
     CUDA_LDCONF="/etc/ld.so.conf.d/cuda-united-pool.conf"
-    # Remove stale confs from previous versions of this script
     sudo rm -f /etc/ld.so.conf.d/cuda-12-1.conf \
                /etc/ld.so.conf.d/cuda-12-8.conf 2>/dev/null || true
     if [ ! -f "$CUDA_LDCONF" ] || ! grep -qF "$CUDA_HOME_PATH" "$CUDA_LDCONF" 2>/dev/null; then
@@ -161,34 +148,9 @@ else
     warn "nvidia-smi not found — GPU auto-detection will fall back to app -l"
 fi
 
-# ─── 7. Python dependencies ──────────────────────────────────────────────────
+# ─── 7. Clone / update repository ────────────────────────────────────────────
 
-section "7. Python dependencies"
-python3 -m pip install --upgrade pip -q 2>/dev/null \
-    || python3 -m pip install --upgrade pip -q --break-system-packages 2>/dev/null \
-    || warn "pip upgrade failed"
-
-PYTHON_PKGS=(
-    requests      # HTTP calls to pool API and Telegram
-    colorama      # Colored terminal output
-    flask         # Web dashboard (dashboard.py)
-    werkzeug      # Flask dependency — HTTP utilities
-)
-
-for pkg in "${PYTHON_PKGS[@]%%#*}"; do
-    [[ -z "$pkg" ]] && continue
-    if python3 -m pip install "$pkg" -q 2>/dev/null; then
-        ok "pip: $pkg"
-    elif python3 -m pip install "$pkg" -q --break-system-packages 2>/dev/null; then
-        ok "pip: $pkg"
-    else
-        fail "pip: $pkg — install failed"
-    fi
-done
-
-# ─── 8. Clone / update repository ────────────────────────────────────────────
-
-section "8. Repository"
+section "7. Repository"
 if [ ! -d "$REPO_DIR" ]; then
     if git clone "$REPO_URL" "$REPO_DIR"; then
         ok "Cloned to $REPO_DIR"
@@ -199,6 +161,51 @@ else
     ok "Repository already exists at $REPO_DIR"
     cd "$REPO_DIR"
     git pull --ff-only 2>/dev/null && ok "Repository updated" || warn "git pull failed — using existing files"
+fi
+
+# ─── 8. Python virtual environment + dependencies ────────────────────────────
+
+section "8. Python virtual environment + dependencies"
+VENV_DIR="$REPO_DIR/.venv"
+
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR" \
+        && ok "Virtual environment created at .venv" \
+        || { warn "venv creation failed — falling back to system pip"; VENV_DIR=""; }
+else
+    ok "Virtual environment already exists"
+fi
+
+PYTHON_PKGS=(requests colorama flask werkzeug)
+
+if [ -n "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/pip" ]; then
+    VENV_PIP="$VENV_DIR/bin/pip"
+    "$VENV_PIP" install --upgrade pip -q 2>/dev/null || true
+
+    for pkg in "${PYTHON_PKGS[@]}"; do
+        if "$VENV_PIP" install "$pkg" -q 2>/dev/null; then
+            ok "pip: $pkg"
+        else
+            fail "pip: $pkg — install failed"
+        fi
+    done
+
+    ok "Python packages installed in .venv — miner.sh will use it automatically"
+else
+    warn "No venv available — installing to system Python (may need sudo or --break-system-packages)"
+    python3 -m pip install --upgrade pip -q 2>/dev/null \
+        || python3 -m pip install --upgrade pip -q --break-system-packages 2>/dev/null \
+        || true
+
+    for pkg in "${PYTHON_PKGS[@]}"; do
+        if python3 -m pip install "$pkg" -q 2>/dev/null; then
+            ok "pip: $pkg"
+        elif python3 -m pip install "$pkg" -q --break-system-packages 2>/dev/null; then
+            ok "pip: $pkg"
+        else
+            fail "pip: $pkg — install failed"
+        fi
+    done
 fi
 
 # ─── 9. Binary permissions ───────────────────────────────────────────────────

@@ -53,7 +53,7 @@ This installs everything needed and continues even if individual steps fail (e.g
 - NVIDIA CUDA 12.8 repository, compiler, libraries, and runtime
 - CUDA environment variables written to `~/.bashrc`
 - CUDA libs registered system-wide via `ldconfig` — no need to manually set `LD_LIBRARY_PATH`
-- Python packages: `requests`, `colorama`, `flask`, `werkzeug`
+- Python virtual environment at `.venv/` with `requests`, `colorama`, `flask`, `werkzeug`
 - Execute permissions on binaries in `bin/`
 
 At the end it prints a summary of any warnings or errors.
