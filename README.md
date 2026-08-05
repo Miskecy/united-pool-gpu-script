@@ -163,7 +163,7 @@ nano settings.json
 | `post_block_delay_enabled` | Wait between blocks | `false` |
 | `post_block_delay_minutes` | How long to wait between blocks (minutes) | `1` |
 | `send_additional_keys_to_api` | Also submit keys found for `additional_addresses` to the pool | `false` |
-| `telegram_share` | Enable/disable Telegram notifications (can also be toggled from the dashboard) | `true` |
+| `telegram_share` | Enable/disable Telegram notifications — when `false`, all notifications are silently suppressed (no warnings). Also toggleable from the dashboard. | `true` |
 | `telegram_accesstoken` | Telegram bot token | `123456:ABC...` |
 | `telegram_chatid` | Telegram chat/user ID to send status to | `468056589` |
 | `dashboard_password` | Password for the web dashboard — leave empty to disable auth | `"mysecretpass"` |
@@ -325,11 +325,12 @@ The port can be changed with `dashboard_port` in `settings.json`.
 | **Status cards** | Current keyspace, addresses, pending keys, last batch, last error, key found, GPU info |
 | **GPU display** | Multiple GPUs shown as individual styled rows with index badge |
 | **Session bar** | Uptime, blocks done, consecutive successes, keyspace searched, average speed, worker name, algorithm |
-| **Average speed** | Live-computed from log output; rolling average of last 20 readings per GPU — single and multi-GPU |
+| **Average speed** | Updated every ~2 s from the binary's progress output (e.g. `2957 MK/s`); shows "Measuring…" on startup |
+| **Next Fetch In** | Shows countdown seconds when a post-block delay is active; shows "Running" during active key search |
 | **Live log viewer** | Auto-tails `miner.log` with structured color coding — Info (blue), Warning (yellow), Error (red), Success (green), Found (purple) |
 | **Log filter** | Filter by level: All / Info / Warning / Error / Success / Found |
 | **File viewer** | Shows non-empty contents of `in.txt`, `out.txt`, and `pending_keys.json` — hidden when empty |
-| **Telegram toggle** | Enable or disable Telegram notifications from the dashboard — no restart needed |
+| **Telegram toggle** | Button shows current state and the action clicking will take ("Telegram ON · Disable" / "Telegram OFF · Enable") — no restart needed |
 | **Miner controls** | Start / Restart / Stop buttons control `script.py` only; dashboard stays running |
 | **Graceful stop** | "Stop After Block" — sets a flag so the miner exits cleanly after the current block finishes (cancellable) |
 | **Emergency stop** | "Stop All" button immediately kills both the miner and the dashboard |
