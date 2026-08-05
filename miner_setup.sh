@@ -58,17 +58,36 @@ fi
 # ─── 4. CUDA installation ────────────────────────────────────────────────────
 
 section "4. CUDA (compiler + runtime)"
+CUDA_INSTALLED=false
+
+# Check 1: nvcc in PATH
 if command -v nvcc &>/dev/null; then
     CUDA_VER=$(nvcc --version 2>/dev/null | grep -oP "release \K[0-9]+\.[0-9]+")
-    ok "CUDA ${CUDA_VER} already installed — skipping install"
-else
-    echo "  No nvcc found. Trying to install CUDA 12.8..."
+    ok "CUDA ${CUDA_VER} already installed (nvcc found) — skipping install"
+    CUDA_INSTALLED=true
+fi
+
+# Check 2: any /usr/local/cuda-* directory exists (toolkit installed but not in PATH)
+if [ "$CUDA_INSTALLED" = false ] && compgen -G "/usr/local/cuda-*" > /dev/null 2>&1; then
+    FOUND_DIR=$(ls -d /usr/local/cuda-* 2>/dev/null | sort -V | tail -1)
+    ok "CUDA directory found at ${FOUND_DIR} — skipping install"
+    CUDA_INSTALLED=true
+fi
+
+# Check 3: libcuda.so present (runtime-only install without full toolkit)
+if [ "$CUDA_INSTALLED" = false ] && ldconfig -p 2>/dev/null | grep -q "libcuda.so"; then
+    ok "CUDA runtime library (libcuda.so) found — skipping install"
+    CUDA_INSTALLED=true
+fi
+
+if [ "$CUDA_INSTALLED" = false ]; then
+    echo "  No CUDA detected. Installing CUDA 13.0..."
     sudo apt-get install -y \
-        cuda-compiler-12-8 \
-        cuda-libraries-12-8 \
-        cuda-runtime-12-8 \
-        && ok "CUDA 12.8 installed" \
-        || warn "CUDA install failed — if your driver is newer than 570, install the matching CUDA version manually"
+        cuda-compiler-13-0 \
+        cuda-libraries-13-0 \
+        cuda-runtime-13-0 \
+        && ok "CUDA 13.0 installed" \
+        || warn "CUDA 13.0 install failed — try installing CUDA manually from https://developer.nvidia.com/cuda-downloads"
 fi
 
 # ─── 5. CUDA environment variables ───────────────────────────────────────────
@@ -84,7 +103,7 @@ fi
 if [ -z "$CUDA_HOME_PATH" ] || [ ! -d "$CUDA_HOME_PATH" ]; then
     for d in /usr/local/cuda-13.2 /usr/local/cuda-13.1 /usr/local/cuda-13.0 \
               /usr/local/cuda-12.8 /usr/local/cuda-12.6 /usr/local/cuda-12.4 \
-              /usr/local/cuda; do
+              /usr/local/cuda-12.0 /usr/local/cuda; do
         if [ -d "$d" ]; then
             CUDA_HOME_PATH="$d"
             break
