@@ -765,6 +765,8 @@ def _ensure_status_message(initial_text):
     return STATUS_MESSAGE_ID
 
 def edit_telegram_status(message):
+    if not TELEGRAM_SHARE:
+        return
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger("Warning", "Telegram settings missing. Notification not sent.")
         return
@@ -1390,7 +1392,8 @@ def run_external_program(start_hex, end_hex):
             env=env,
         ) as process:
             last_dyn_len = 0
-            progress_re = re.compile(r"^\s*\[\s*(\d+(?:\.\d+)?)\s*([GMK])?keys/s\].*", re.IGNORECASE)
+            # Matches: "2957.17 MK/s (...)" — number followed by G/M/K then K/s
+            progress_re = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([GMK])K/s", re.IGNORECASE)
             for raw in process.stdout:
                 msg = raw.rstrip("\n")
                 txt = msg.strip()
