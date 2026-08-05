@@ -3,3 +3,4 @@ script-cavacuda.py
 settings_model.json
 preset_config
 .venv/
+.vscode
