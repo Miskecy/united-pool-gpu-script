@@ -448,7 +448,7 @@ nano settings.json
 - Miner controls (Start / Stop / Restart) call `miner.sh start-miner / stop-miner / restart-miner` — the dashboard process stays running
 - "Stop After Block" creates a `.stop_after_block` flag file; `script.py` checks for it at the start of each loop and exits cleanly if found
 - "Stop All" kills the miner via its PID file then sends `SIGTERM` to the dashboard itself via a background thread
-- Average speed is computed client-side from SSE log lines — no server changes needed
+- Average speed is parsed from the binary's progress output by `script.py` and written to `status.json` every ~2 seconds
 
 ---
 
@@ -456,14 +456,34 @@ nano settings.json
 
 ### `libcudart.so.12: cannot open shared object file`
 
-The CUDA runtime library is not on the dynamic linker path. Fix permanently:
+The CUDA runtime library is not on the dynamic linker path. Fix permanently (replace `cuda-X.Y` with your installed version):
 
 ```bash
-echo "/usr/local/cuda-12.8/lib64" | sudo tee /etc/ld.so.conf.d/cuda-12-8.conf
+echo "/usr/local/cuda-X.Y/lib64" | sudo tee /etc/ld.so.conf.d/cuda-united-pool.conf
 sudo ldconfig
 ```
 
 Then restart the miner.
+
+### CUDA install fails with unmet dependencies (RTX 50xx / driver 610+)
+
+Newer GPUs like the RTX 5090 require driver 610+ and CUDA 13.x. The setup script now auto-detects your installed CUDA version and skips installation if `nvcc` is already working — so re-run the setup and the CUDA step will be skipped automatically.
+
+If you need to install CUDA manually to match your driver, check which version your driver supports:
+
+```bash
+nvidia-smi    # shows driver version in top-right corner
+```
+
+Then install the matching CUDA toolkit from [developer.nvidia.com/cuda-downloads](https://developer.nvidia.com/cuda-downloads).
+
+### Flask install fails (`pip` blocked by system policy)
+
+On Ubuntu 22.04+ with Python 3.11+, pip may refuse to install packages system-wide. The setup script now retries with `--break-system-packages` automatically. If you hit this manually:
+
+```bash
+pip install flask --break-system-packages
+```
 
 ### Dashboard is not accessible from browser
 

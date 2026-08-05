@@ -3,8 +3,6 @@
 
 REPO_URL="https://github.com/Miskecy/united-pool-gpu-script.git"
 REPO_DIR="$HOME/united-pool-gpu-script"
-CUDA_VERSION="12-8"
-CUDA_HOME_PATH="/usr/local/cuda-12.8"
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -19,7 +17,6 @@ fail() { echo -e "${RED}  [FAIL]${NC} $1"; ERRORS+=("FAIL: $1"); }
 section() { echo -e "\n${GREEN}==>${NC} $1"; }
 
 try() {
-    # Usage: try "description" cmd arg arg ...
     local desc="$1"; shift
     if "$@" 2>/dev/null; then
         ok "$desc"
@@ -59,7 +56,7 @@ if [ ! -f /etc/apt/sources.list.d/cuda-ubuntu2204-x86_64.list ] && \
         "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb"; then
         sudo dpkg -i "$TMP_DEB" && sudo apt-get update -qq \
             && ok "CUDA repository added" \
-            || warn "CUDA repo dpkg/update failed — CUDA install will likely fail"
+            || warn "CUDA repo dpkg/update failed"
     else
         warn "Failed to download CUDA keyring — NVIDIA packages unavailable"
     fi
@@ -68,28 +65,50 @@ else
     ok "CUDA repository already present"
 fi
 
-# ─── 4. CUDA 12.8 ────────────────────────────────────────────────────────────
+# ─── 4. CUDA installation ────────────────────────────────────────────────────
 
-section "4. CUDA 12.8 (compiler + runtime)"
-if command -v nvcc &>/dev/null && nvcc --version 2>/dev/null | grep -q "12\.8"; then
-    ok "CUDA 12.8 already installed"
+section "4. CUDA (compiler + runtime)"
+if command -v nvcc &>/dev/null; then
+    CUDA_VER=$(nvcc --version 2>/dev/null | grep -oP "release \K[0-9]+\.[0-9]+")
+    ok "CUDA ${CUDA_VER} already installed — skipping install"
 else
+    echo "  No nvcc found. Trying to install CUDA 12.8..."
     sudo apt-get install -y \
-        cuda-compiler-${CUDA_VERSION} \
-        cuda-libraries-${CUDA_VERSION} \
-        cuda-runtime-${CUDA_VERSION} \
+        cuda-compiler-12-8 \
+        cuda-libraries-12-8 \
+        cuda-runtime-12-8 \
         && ok "CUDA 12.8 installed" \
-        || warn "CUDA 12.8 install failed — GPU mining binaries may not work"
+        || warn "CUDA install failed — if your driver is newer than 570, install the matching CUDA version manually"
 fi
 
 # ─── 5. CUDA environment variables ───────────────────────────────────────────
 
 section "5. CUDA environment variables"
-if [ -d "$CUDA_HOME_PATH" ]; then
-    MARKER="# ==== CUDA 12.8 CONFIG (united-pool-gpu-script) ===="
+
+# Auto-detect CUDA home: prefer path from nvcc binary, then scan /usr/local
+CUDA_HOME_PATH=""
+if command -v nvcc &>/dev/null; then
+    NVCC_BIN=$(command -v nvcc)
+    CUDA_HOME_PATH=$(dirname "$(dirname "$NVCC_BIN")")
+fi
+if [ -z "$CUDA_HOME_PATH" ] || [ ! -d "$CUDA_HOME_PATH" ]; then
+    for d in /usr/local/cuda-13.2 /usr/local/cuda-13.1 /usr/local/cuda-13.0 \
+              /usr/local/cuda-12.8 /usr/local/cuda-12.6 /usr/local/cuda-12.4 \
+              /usr/local/cuda; do
+        if [ -d "$d" ]; then
+            CUDA_HOME_PATH="$d"
+            break
+        fi
+    done
+fi
+
+if [ -n "$CUDA_HOME_PATH" ] && [ -d "$CUDA_HOME_PATH" ]; then
+    CUDA_LABEL=$(basename "$CUDA_HOME_PATH")   # e.g. cuda-13.2
+    MARKER="# ==== CUDA CONFIG (united-pool-gpu-script) ===="
+
     if ! grep -qF "$MARKER" ~/.bashrc 2>/dev/null; then
-        # Remove any stale CUDA entries from previous versions (12.1, 12.x, etc.)
-        sed -i '/CUDA 12\|cuda-12\|CUDA 13\|cuda-13\|CUDA 12\.1 CONFIG/d' ~/.bashrc 2>/dev/null || true
+        # Remove stale entries from any previous run of this script
+        sed -i '/CUDA CONFIG (united-pool-gpu-script)/,+4d' ~/.bashrc 2>/dev/null || true
         cat >> ~/.bashrc <<EOF
 
 $MARKER
@@ -97,29 +116,31 @@ export CUDA_HOME=${CUDA_HOME_PATH}
 export PATH=\$CUDA_HOME/bin:\$PATH
 export LD_LIBRARY_PATH=\$CUDA_HOME/lib64:\${LD_LIBRARY_PATH:-}
 EOF
-        ok "CUDA env written to ~/.bashrc"
+        ok "CUDA env written to ~/.bashrc (${CUDA_LABEL})"
     else
         ok "CUDA env already in ~/.bashrc"
     fi
+
     export CUDA_HOME="$CUDA_HOME_PATH"
     export PATH="$CUDA_HOME/bin:$PATH"
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
 
-    # Register libs with the system linker so any session can find libcudart
-    CUDA_LDCONF="/etc/ld.so.conf.d/cuda-12-8.conf"
-    # Remove stale conf from older CUDA version if present
-    [ -f /etc/ld.so.conf.d/cuda-12-1.conf ] && sudo rm -f /etc/ld.so.conf.d/cuda-12-1.conf 2>/dev/null || true
-    if [ ! -f "$CUDA_LDCONF" ]; then
+    # Register libs with system linker — use a version-neutral conf name
+    CUDA_LDCONF="/etc/ld.so.conf.d/cuda-united-pool.conf"
+    # Remove stale confs from previous versions of this script
+    sudo rm -f /etc/ld.so.conf.d/cuda-12-1.conf \
+               /etc/ld.so.conf.d/cuda-12-8.conf 2>/dev/null || true
+    if [ ! -f "$CUDA_LDCONF" ] || ! grep -qF "$CUDA_HOME_PATH" "$CUDA_LDCONF" 2>/dev/null; then
         echo "$CUDA_HOME_PATH/lib64" | sudo tee "$CUDA_LDCONF" > /dev/null \
             && sudo ldconfig \
             && ok "CUDA libs registered with ldconfig" \
-            || warn "ldconfig registration failed — set LD_LIBRARY_PATH manually before running script.py"
+            || warn "ldconfig failed — set LD_LIBRARY_PATH manually if needed"
     else
         ok "CUDA ldconfig entry already present"
         sudo ldconfig 2>/dev/null || true
     fi
 else
-    warn "CUDA dir $CUDA_HOME_PATH not found — skipping env config"
+    warn "No CUDA installation found — skipping env config"
 fi
 
 # ─── 6. Verify CUDA ──────────────────────────────────────────────────────────
@@ -137,14 +158,15 @@ if command -v nvidia-smi &>/dev/null; then
         && ok "nvidia-smi GPU list OK" \
         || warn "nvidia-smi found but failed to query GPUs"
 else
-    warn "nvidia-smi not found — GPU auto-detection in script.py will fall back to app -l"
+    warn "nvidia-smi not found — GPU auto-detection will fall back to app -l"
 fi
 
 # ─── 7. Python dependencies ──────────────────────────────────────────────────
 
 section "7. Python dependencies"
-# Upgrade pip quietly; failure is non-fatal
-python3 -m pip install --upgrade pip -q 2>/dev/null || warn "pip upgrade failed"
+python3 -m pip install --upgrade pip -q 2>/dev/null \
+    || python3 -m pip install --upgrade pip -q --break-system-packages 2>/dev/null \
+    || warn "pip upgrade failed"
 
 PYTHON_PKGS=(
     requests      # HTTP calls to pool API and Telegram
@@ -153,9 +175,11 @@ PYTHON_PKGS=(
     werkzeug      # Flask dependency — HTTP utilities
 )
 
-for pkg in "${PYTHON_PKGS[@]%%#*}"; do   # strip inline comments
+for pkg in "${PYTHON_PKGS[@]%%#*}"; do
     [[ -z "$pkg" ]] && continue
     if python3 -m pip install "$pkg" -q 2>/dev/null; then
+        ok "pip: $pkg"
+    elif python3 -m pip install "$pkg" -q --break-system-packages 2>/dev/null; then
         ok "pip: $pkg"
     else
         fail "pip: $pkg — install failed"
@@ -207,7 +231,7 @@ fi
 echo ""
 echo "Run the miner:"
 echo "  cd $REPO_DIR"
-echo "  bash miner.sh start          # background process"
+echo "  bash miner.sh start          # background (miner + dashboard)"
 echo ""
 echo "Run the web dashboard:"
 echo "  python3 dashboard.py         # access at http://YOUR_IP:8080"
