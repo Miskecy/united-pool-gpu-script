@@ -108,11 +108,9 @@ def api_status():
 @_require_auth
 def log_stream():
     def _gen():
-        if not os.path.exists(LOG_FILE):
-            while True:
-                yield ": keep-alive\n\n"
-                time.sleep(5)
-            return
+        while not os.path.exists(LOG_FILE):
+            yield ": keep-alive\n\n"
+            time.sleep(2)
         with open(LOG_FILE, encoding="utf-8", errors="replace") as fh:
             for line in fh.readlines()[-200:]:
                 yield f"data: {json.dumps(line.rstrip())}\n\n"

@@ -25,6 +25,10 @@ from telegram_status import (
     send_notification_rl as _tg_send_rl,
 )
 
+# Always resolve relative paths (status.json, in.txt, out.txt …) from the
+# script's own directory, regardless of which directory the caller was in.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 def _load_settings():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     path = os.path.join(base_dir, "settings.json")
