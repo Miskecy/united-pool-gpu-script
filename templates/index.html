@@ -469,18 +469,22 @@ document.querySelectorAll('.fbtn').forEach(btn => {
   });
 });
 
-// SSE
-function connectSSE() {
-  const es = new EventSource('/api/logs/stream');
-  es.onopen    = () => connDot.classList.remove('off');
-  es.onmessage = e  => appendLine(JSON.parse(e.data));
-  es.onerror   = () => {
+// Log polling (replaces SSE — more reliable through proxies/tunnels)
+let _logOffset = -1;
+async function pollLogs() {
+  try {
+    const r = await fetch(`/api/logs/poll?offset=${_logOffset}`);
+    if (!r.ok) { connDot.classList.add('off'); return; }
+    connDot.classList.remove('off');
+    const d = await r.json();
+    if (d.lines && d.lines.length) d.lines.forEach(appendLine);
+    _logOffset = d.offset;
+  } catch (_) {
     connDot.classList.add('off');
-    es.close();
-    setTimeout(connectSSE, 3000);
-  };
+  }
 }
-connectSSE();
+pollLogs();
+setInterval(pollLogs, 2000);
 
 // ── GPU rendering ────────────────────────────────────────────────
 function renderGPUs(raw) {

@@ -104,34 +104,31 @@ def api_status():
     return jsonify(data)
 
 
-@app.route("/api/logs/stream")
+@app.route("/api/logs/poll")
 @_require_auth
-def log_stream():
-    def _gen():
-        while not os.path.exists(LOG_FILE):
-            yield ": keep-alive\n\n"
-            time.sleep(2)
-        with open(LOG_FILE, encoding="utf-8", errors="replace") as fh:
-            for line in fh.readlines()[-200:]:
-                yield f"data: {json.dumps(line.rstrip())}\n\n"
-            while True:
-                line = fh.readline()
-                if line:
-                    yield f"data: {json.dumps(line.rstrip())}\n\n"
-                else:
-                    yield ": keep-alive\n\n"
-                    time.sleep(0.25)
-
-    return Response(
-        _gen(),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
+def log_poll():
+    offset = request.args.get("offset", type=int, default=-1)
+    try:
+        if not os.path.exists(LOG_FILE):
+            return jsonify({"lines": [], "offset": 0})
+        with open(LOG_FILE, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            if offset < 0:
+                start = max(0, size - 10240)   # initial load: last 10 KB
+            elif offset > size:
+                start = 0                       # file was rotated/truncated
+            else:
+                start = offset
+            if start >= size:
+                return jsonify({"lines": [], "offset": size})
+            fh.seek(start)
+            chunk = fh.read(min(size - start, 65536))
+        text = chunk.decode("utf-8", errors="replace")
+        lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+        return jsonify({"lines": lines, "offset": start + len(chunk)})
+    except Exception:
+        return jsonify({"lines": [], "offset": max(0, offset or 0)})
 
 
 @app.route("/api/miner/<action>", methods=["POST"])
