@@ -441,7 +441,7 @@ STATUS = {
 
 _SPEED_WRITE_TS = 0.0
 _GPU_SPEEDS = {}  # {gpu_id: mkeys_per_second} — aggregated for multi-GPU speed
-_GPU_SPEED_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([GMK])K/s", re.IGNORECASE)
+_GPU_SPEED_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([GMK])[Kk](?:ey[s]?)?/s", re.IGNORECASE)
 
 
 def _ingest_speed(value, unit):
@@ -1409,8 +1409,8 @@ def run_external_program(start_hex, end_hex):
             env=env,
         ) as process:
             last_dyn_len = 0
-            # Matches: "2957.17 MK/s (...)" — number followed by G/M/K then K/s
-            progress_re = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([GMK])K/s", re.IGNORECASE)
+            # Matches speed lines: "2957.17 MK/s", "2957.17 MKey/s", "2957.17 Mkeys/s"
+            progress_re = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([GMK])[Kk](?:ey[s]?)?/s", re.IGNORECASE)
             for raw in process.stdout:
                 msg = raw.rstrip("\n")
                 txt = msg.strip()

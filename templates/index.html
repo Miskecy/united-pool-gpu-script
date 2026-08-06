@@ -652,7 +652,7 @@ function applyStatus(d) {
 
 async function pollStatus() {
   try {
-    const r = await fetch('/api/status');
+    const r = await fetch(`/api/status?_=${Date.now()}`);
     if (r.ok) applyStatus(await r.json());
   } catch (_) {}
 }
@@ -689,7 +689,7 @@ async function toggleTelegram() {
 // ── Files panel ──────────────────────────────────────────────────
 async function pollFiles() {
   try {
-    const r = await fetch('/api/files');
+    const r = await fetch(`/api/files?_=${Date.now()}`);
     if (!r.ok) return;
     const d = await r.json();
 
