@@ -440,6 +440,8 @@ STATUS = {
 }
 
 _SPEED_WRITE_TS = 0.0
+_GPU_SPEEDS = {}  # {gpu_id: mkeys_per_second} — aggregated for multi-GPU speed
+_GPU_SPEED_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([GMK])K/s", re.IGNORECASE)
 
 
 def _ingest_speed(value, unit):
@@ -1237,6 +1239,16 @@ def _stream_gpu_output(proc, gid):
             txt = (raw or "").rstrip("\n").strip()
             if txt:
                 print(f"{Fore.CYAN}[GPU {gid}] {txt}{Style.RESET_ALL}", flush=True)
+                m = _GPU_SPEED_RE.search(txt)
+                if m:
+                    try:
+                        u = m.group(2).upper()
+                        v = float(m.group(1))
+                        mk = v * 1000 if u == "G" else v / 1000 if u == "K" else v
+                        _GPU_SPEEDS[gid] = mk
+                        _ingest_speed(sum(_GPU_SPEEDS.values()), "M")
+                    except Exception:
+                        pass
     except Exception:
         pass
 
@@ -1270,6 +1282,7 @@ def run_external_program(start_hex, end_hex):
     gpu_details = _detect_gpu_details()
     kind = (PROGRAM_KIND or "").strip().lower()
     if len(gpu_ids) > 1:
+        _GPU_SPEEDS.clear()
         segments = _split_keyspace_weighted(start_hex, end_hex, gpu_ids)
         procs = []
         threads = []

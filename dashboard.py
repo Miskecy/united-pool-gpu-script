@@ -5,6 +5,7 @@ Web dashboard for the GPU miner.
 Access at http://YOUR_VPS_IP:<port> — reads dashboard_port from settings.json.
 Set "dashboard_password" in settings.json to require a login.
 """
+import glob
 import json
 import os
 import signal
@@ -206,6 +207,20 @@ def api_files():
                     content = f.read().strip()
                 if content:
                     result[key] = content
+        except Exception:
+            pass
+
+    # During a multi-GPU run out.txt is empty; fall back to per-GPU files
+    if "out" not in result:
+        try:
+            parts = []
+            for gf in sorted(glob.glob(os.path.join(SCRIPT_DIR, "out_gpu_*.txt"))):
+                with open(gf, encoding="utf-8", errors="replace") as f:
+                    c = f.read().strip()
+                if c:
+                    parts.append(c)
+            if parts:
+                result["out"] = "\n".join(parts)
         except Exception:
             pass
 
