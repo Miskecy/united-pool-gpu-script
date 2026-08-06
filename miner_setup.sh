@@ -195,7 +195,7 @@ else
     ok "Virtual environment already exists"
 fi
 
-PYTHON_PKGS=(requests colorama flask werkzeug)
+PYTHON_PKGS=(requests colorama)
 
 if [ -n "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/pip" ]; then
     VENV_PIP="$VENV_DIR/bin/pip"
@@ -257,9 +257,6 @@ fi
 echo ""
 echo "Run the miner:"
 echo "  cd $REPO_DIR"
-echo "  bash miner.sh start          # background (miner + dashboard)"
-echo ""
-echo "Run the web dashboard:"
-echo "  python3 dashboard.py         # access at http://YOUR_IP:8080"
-echo "  (optional) add \"dashboard_password\" to settings.json to require login"
+echo "  bash miner.sh start    # launch in background"
+echo "  bash miner.sh logs     # tail live output"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
