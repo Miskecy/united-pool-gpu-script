@@ -1532,16 +1532,9 @@ def process_out_file():
         _save_pending_keys()
         update_status({"pending_keys": len(PENDING_KEYS)})
 
-    # 3. Clear out.txt for the next cycle
-    try:
-        with open(OUT_FILE, "w"):
-            pass
-        logger("Info", f"File '{OUT_FILE}' cleared for next cycle.")
-        _clean_gpu_out_files()
-    except Exception as e:
-        logger("Error", f"Failed to clear file '{OUT_FILE}': {e}")
-        update_status_rl({"last_error": f"Clear out error `{type(e).__name__}`"}, "clear_out_error", 120)
-        notify_error("clear_out_error", f"Clear out error `{type(e).__name__}`", api_offline=False, sleep_seconds=0, rate_limit=120)
+    # out.txt is cleared by run_external_program() at the start of the next block,
+    # so it stays visible on the dashboard between blocks. Only clean temp GPU files.
+    _clean_gpu_out_files()
 
     return False # Indicates the additional address key was NOT found
 

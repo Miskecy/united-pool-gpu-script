@@ -18,6 +18,12 @@ from flask import Flask, render_template, jsonify, Response, request, abort
 SCRIPT_DIR        = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=os.path.join(SCRIPT_DIR, "templates"))
 
+@app.after_request
+def _no_cache(response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
 LOG_FILE          = os.path.join(SCRIPT_DIR, "miner.log")
 STATUS_FILE       = os.path.join(SCRIPT_DIR, "status.json")
 SETTINGS_FILE     = os.path.join(SCRIPT_DIR, "settings.json")
