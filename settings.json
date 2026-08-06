@@ -27,5 +27,5 @@
     "telegram_accesstoken": "YOUR_TELEGRAM_BOT_TOKEN",
     "telegram_chatid": "YOUR_CHAT_ID",
     "dashboard_password": "",
-    "dashboard_port": 8080
+    "dashboard_port": 5555
 }

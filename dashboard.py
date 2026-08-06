@@ -2,7 +2,7 @@
 """
 Web dashboard for the GPU miner.
   python3 dashboard.py
-Access at http://YOUR_VPS_IP:8080 (set DASHBOARD_PORT env var to change).
+Access at http://YOUR_VPS_IP:<port> — reads dashboard_port from settings.json.
 Set "dashboard_password" in settings.json to require a login.
 """
 import json
@@ -127,7 +127,12 @@ def log_stream():
     return Response(
         _gen(),
         mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

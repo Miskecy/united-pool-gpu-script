@@ -242,6 +242,23 @@ else
     warn "bin/ directory not found in $REPO_DIR — create it and add your GPU binaries"
 fi
 
+# ─── 10. cloudflared (Cloudflare quick tunnel) ──────────────────────────────
+
+section "10. cloudflared (Cloudflare quick tunnel)"
+CLOUDFLARED_BIN="$REPO_DIR/cloudflared"
+if [ -f "$CLOUDFLARED_BIN" ] && "$CLOUDFLARED_BIN" --version &>/dev/null; then
+    ok "cloudflared already present ($("$CLOUDFLARED_BIN" --version 2>&1 | head -1))"
+else
+    CF_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+    echo "  Downloading cloudflared..."
+    if wget -q --show-progress -O "$CLOUDFLARED_BIN" "$CF_URL"; then
+        chmod +x "$CLOUDFLARED_BIN"
+        ok "cloudflared downloaded and marked executable at $CLOUDFLARED_BIN"
+    else
+        warn "cloudflared download failed — tunnel commands will be unavailable"
+    fi
+fi
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 
 echo ""
@@ -262,4 +279,8 @@ echo ""
 echo "Run the web dashboard:"
 echo "  python3 dashboard.py         # access at http://YOUR_IP:8080"
 echo "  (optional) add \"dashboard_password\" to settings.json to require login"
+echo ""
+echo "Cloudflare tunnel (no root / no open ports needed):"
+echo "  bash miner.sh tunnel-start   # start tunnel, prints public URL"
+echo "  bash miner.sh links          # show local + tunnel URLs"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
